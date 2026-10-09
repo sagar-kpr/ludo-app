@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: rally-ludo-server
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev
+    startCommand: npm run server:start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+# Gameplay initially runs in memory without Supabase credentials.
+# Add SUPABASE_URL and a fresh SUPABASE_SERVICE_ROLE_KEY in Render's dashboard
+# only if enabling persistence. Never commit credentials to this file.

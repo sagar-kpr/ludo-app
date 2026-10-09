@@ -1,0 +1,44 @@
+{
+  "name": "ludo-premium-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "web": "npm --prefix apps/mobile run web",
+    "expo": "npm --prefix apps/mobile run start",
+    "build": "tsc -b && vite build",
+    "build:web": "node scripts/build-web.mjs",
+    "preview:web": "npx serve apps/mobile/dist",
+    "deploy:web": "npm run build:web && npx firebase-tools deploy --only hosting",
+    "server": "tsx watch apps/game-server/src/index.ts",
+    "server:start": "tsx apps/game-server/src/index.ts",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "test": "vitest run",
+    "export:e2e": "cd apps/mobile && EXPO_PUBLIC_REALTIME_URL=ws://127.0.0.1:19551 npx expo export --platform web --output-dir dist-e2e --clear",
+    "test:browser": "npm run export:e2e && playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "typescript": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "lucide-react": "latest",
+    "ws": "latest",
+    "@supabase/supabase-js": "latest",
+    "dotenv": "latest",
+    "@capacitor/core": "latest",
+    "@capacitor/android": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "vitest": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/ws": "latest",
+    "tsx": "latest",
+    "@capacitor/cli": "latest"
+  }
+}

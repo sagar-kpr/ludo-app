@@ -1,0 +1,13 @@
+.pawn-hit{position:absolute;left:0;top:0;width:6.666667%;height:6.666667%;padding:0;background:transparent;z-index:5;will-change:transform;isolation:isolate}
+.pawn-hit:disabled{cursor:default}
+.pawn-hit span{position:absolute;display:block;pointer-events:none}
+.pawn-shadow{width:76%;height:22%;left:12%;bottom:0;background:#171b3240;border-radius:50%;filter:blur(1px)}
+.pawn-base{width:76%;height:30%;left:12%;bottom:6%;border-radius:50%;background:linear-gradient(180deg,#ffffff44,var(--pawn-color) 35%,#0003),var(--pawn-color);box-shadow:0 2px 1px #0005}
+.pawn-body{width:40%;height:46%;left:30%;bottom:15%;border-radius:35% 35% 20% 20%;background:linear-gradient(90deg,#ffffff55,var(--pawn-color) 45%,#0002),var(--pawn-color)}
+.pawn-head{width:48%;height:48%;left:26%;top:2%;border-radius:50%;background:radial-gradient(circle at 30% 22%,#ffffffcc 0%,#ffffff55 15%,var(--pawn-color) 45%,#0002 100%),var(--pawn-color);box-shadow:inset 0 -2px 2px #0003}
+.pawn-number{left:0;bottom:10%;width:100%;font-size:clamp(7px,1vw,10px);font-weight:800;color:white;text-shadow:0 1px 1px #0006}
+.pawn-legal{z-index:20;cursor:pointer}
+.pawn-legal:before{content:'';position:absolute;left:2%;bottom:-1%;width:96%;height:40%;border-radius:50%;border:2px solid white;background:#ffffff66;box-shadow:0 0 8px #ffffffaa}
+.pawn-glow{left:-2.5%;bottom:-5%;width:105%;height:55%;border-radius:50%;border:2px solid var(--pawn-color);background:color-mix(in srgb,var(--pawn-color) 35%,transparent);box-shadow:0 0 10px var(--pawn-color);animation:token-locator 1.3s ease-in-out infinite}
+@keyframes token-locator{0%,100%{opacity:.65;transform:scale(.9)}50%{opacity:1;transform:scale(1.15)}}
+@media(prefers-reduced-motion:reduce){.pawn-glow{animation:none;opacity:.8}}
