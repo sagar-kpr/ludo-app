@@ -97,37 +97,44 @@ func configure(id: String, color: Color) -> void:
 	for step in range(33):
 		var angle := -PI/6.0 + step*(4.0*PI/3.0)/32.0
 		outline.append(Vector2(cos(angle)*0.46,1.05+sin(angle)*0.46))
-	var shell := part(Geometry.beveled_pin(outline,0.38,0.07),Vector3.ZERO,sculpted_finish(Color("e5edf7")))
+	var shell := part(Geometry.beveled_pin(outline,0.38,0.07),Vector3.ZERO,lacquer(Color("52616c")))
 	shell.name = "PinShell"
 	shell.reparent(visual,false)
-	var body := part(Geometry.beveled_pin(outline,0.32,0.06),Vector3(0,0.07,0.10),finish)
+	var body := part(Geometry.beveled_pin(outline,0.32,0.06),Vector3(0,0.035,0.10),lacquer(Color("f5f7fa")))
 	body.name = "PinBody"
-	body.scale = Vector3(0.84,0.88,1.0)
+	body.scale = Vector3(0.92,0.95,1.0)
 	body.reparent(visual,false)
 	var crown := SphereMesh.new()
-	crown.radius = 0.42
-	crown.height = 0.84
+	crown.radius = 0.29
+	crown.height = 0.58
 	crown.radial_segments = 32
 	crown.rings = 16
-	var dome := part(crown,Vector3(0,1.05,0.16),finish)
+	var dome := part(crown,Vector3(0,1.05,0.45),lacquer(color))
 	dome.name = "PinDome"
-	dome.scale.z = 0.65
+	dome.scale.z = 0.48
 	dome.reparent(visual,false)
 	var badge := CylinderMesh.new()
-	badge.top_radius = 0.21
-	badge.bottom_radius = 0.21
+	badge.top_radius = 0.34
+	badge.bottom_radius = 0.34
 	badge.height = 0.025
 	badge.radial_segments = 40
-	var center := part(badge,Vector3(0,1.05,0.435),sculpted_finish(Color.WHITE))
+	var center := part(badge,Vector3(0,1.05,0.40),lacquer(Color("293840")))
 	center.name = "PinBadge"
 	center.rotation.x = PI/2.0
 	center.reparent(visual,false)
-	var dot := SphereMesh.new()
-	dot.radius = 0.13
-	dot.height = 0.26
-	var jewel := part(dot,Vector3(0,1.05,0.46),sculpted_finish(color.darkened(0.28)))
-	jewel.scale.z = 0.25
-	jewel.reparent(visual,false)
+	# A ringed physical base anchors the pin, as in the reference.
+	var base := CylinderMesh.new()
+	base.top_radius = 0.47
+	base.bottom_radius = 0.49
+	base.height = 0.055
+	base.radial_segments = 40
+	part(base,Vector3(0,0.013,0),lacquer(Color("18242e"))).name = "PinBaseOutline"
+	var base_face := CylinderMesh.new()
+	base_face.top_radius = 0.40
+	base_face.bottom_radius = 0.43
+	base_face.height = 0.04
+	base_face.radial_segments = 40
+	part(base_face,Vector3(0,0.05,0),finish).name = "PinBase"
 	var halo := TorusMesh.new()
 	halo.inner_radius = 0.42
 	halo.outer_radius = 0.54

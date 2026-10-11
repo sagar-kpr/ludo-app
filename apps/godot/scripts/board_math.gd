@@ -25,6 +25,10 @@ static func coordinate(color: String, position: int, token_index: int) -> Vector
 	return [Vector2i(7,lane), Vector2i(lane,7), Vector2i(7,14-lane), Vector2i(14-lane,7)][seat]
 
 static func world(color: String, position: int, token_index: int) -> Vector3:
+	if position == 0:
+		var centers := [Vector2(-4.5,-4.5),Vector2(4.5,-4.5),Vector2(4.5,4.5),Vector2(-4.5,4.5)]
+		var center: Vector2 = centers[COLORS.find(color)]
+		return Vector3(center.x+(-1.0 if token_index % 2 == 0 else 1.0),0.22,center.y+(-1.0 if token_index < 2 else 1.0))
 	var square := coordinate(color, position, token_index)
 	return Vector3(square.y - 7,0.22,square.x - 7)
 

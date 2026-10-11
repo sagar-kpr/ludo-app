@@ -7,7 +7,7 @@ const Design = preload("res://scripts/design.gd")
 const BoardMath = preload("res://scripts/board_math.gd")
 const Pawn = preload("res://scripts/pawn.gd")
 const Geometry = preload("res://scripts/geometry.gd")
-const BOARD_COLORS = Design.COLORS
+const BOARD_COLORS = {"coral": Color("ff1010"), "sun": Color("168900"), "mint": Color("ffe200"), "violet": Color("159de8")}
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -89,32 +89,16 @@ func _fit_camera() -> void:
 		camera.size = maxf(16.3,(top-bottom+0.25)*size.x/maxf(size.y,1.0))
 
 func mat(color: Color, wood: bool = false) -> ShaderMaterial:
-	# Matte printed board: flat color surfaces still receive the tokens' shadows.
+	# Printed colors stay saturated and the white cells stay white, independent
+	# of studio lighting. Separate contact shadows ground the lit 3D tokens.
 	if not board_shader:
 		board_shader = Shader.new()
 		board_shader.code = """
 		shader_type spatial;
-		render_mode diffuse_burley, specular_schlick_ggx;
+		render_mode unshaded;
 		uniform vec4 tint : source_color;
-		uniform float wood_amount = 0.0;
-		varying vec3 surface_normal;
-		varying vec3 surface_position;
-		void vertex() {
-			surface_normal = normalize(mat3(MODEL_MATRIX) * NORMAL);
-			surface_position = (MODEL_MATRIX * vec4(VERTEX,1.0)).xyz;
-		}
 		void fragment() {
-			float grain = sin(surface_position.x*17.0+sin(surface_position.z*0.65)*1.7)*sin(surface_position.x*3.2+surface_position.z*0.19)*wood_amount;
-			float chroma = max(tint.r,max(tint.g,tint.b))-min(tint.r,min(tint.g,tint.b));
-			float depth = 1.0;
-			if (chroma > 0.08 && abs(surface_position.x) > 1.5 && abs(surface_position.z) > 1.5) {
-				vec2 home = (abs(surface_position.xz)-vec2(4.5))/2.9;
-				depth = mix(1.06,0.86,smoothstep(0.3,1.0,max(abs(home.x),abs(home.y))));
-			}
-			ALBEDO = tint.rgb * (chroma < 0.08 ? 0.88 : 0.75) * (1.0+grain) * depth;
-			ROUGHNESS = 1.0;
-			METALLIC = 0.0;
-			SPECULAR = 0.0;
+			ALBEDO = tint.rgb;
 		}
 		"""
 	var key := color.to_html()+str(wood)
@@ -122,7 +106,6 @@ func mat(color: Color, wood: bool = false) -> ShaderMaterial:
 		var material := ShaderMaterial.new()
 		material.shader = board_shader
 		material.set_shader_parameter("tint",color)
-		material.set_shader_parameter("wood_amount",0.075 if wood else 0.0)
 		mats[key] = material
 	return mats[key]
 
@@ -166,37 +149,50 @@ func triangle(points: Array, color: Color) -> void:
 	world.add_child(instance)
 
 func star(at: Vector3, colored: bool = false) -> void:
+	# Hollow safe-cell symbol with a thin printed outline.
 	for index in range(10):
 		var a := index * TAU / 10 - PI / 2
 		var b := (index + 1) * TAU / 10 - PI / 2
-		var r1 := 0.32 if index % 2 == 0 else 0.14
-		var r2 := 0.14 if index % 2 == 0 else 0.32
-		triangle([at, at + Vector3(cos(a)*r1, 0, sin(a)*r1), at + Vector3(cos(b)*r2, 0, sin(b)*r2)], Color.WHITE if colored else Color("4b5568"))
+		var r1 := 0.40 if index % 2 == 0 else 0.19
+		var r2 := 0.19 if index % 2 == 0 else 0.40
+		var outer_a := at+Vector3(cos(a)*r1,0,sin(a)*r1)
+		var outer_b := at+Vector3(cos(b)*r2,0,sin(b)*r2)
+		var inner_a := at+Vector3(cos(a)*(r1-0.027),0,sin(a)*(r1-0.027))
+		var inner_b := at+Vector3(cos(b)*(r2-0.027),0,sin(b)*(r2-0.027))
+		var ink := Color.WHITE if colored else Color("171c22")
+		triangle([outer_a,outer_b,inner_a],ink)
+		triangle([inner_a,outer_b,inner_b],ink)
+
+func stroke(from: Vector3, to: Vector3, width: float, color: Color) -> void:
+	var direction := (to-from).normalized()
+	var side := Vector3(-direction.z,0,direction.x)*width*0.5
+	triangle([from-side,to-side,to+side],color)
+	triangle([from-side,to+side,from+side],color)
 
 func arrow(at: Vector3, direction: Vector3, color: Color) -> void:
-	var side := Vector3(-direction.z, 0, direction.x)
-	triangle([at+direction*0.32, at-direction*0.03+side*0.22, at-direction*0.03-side*0.22], color)
-	var tail := at-direction*0.29
-	triangle([tail-side*0.085, tail+side*0.085, at+side*0.085],color)
-	triangle([tail-side*0.085, at+side*0.085, at-side*0.085],color)
+	var side := Vector3(-direction.z,0,direction.x)
+	var tip := at+direction*0.29
+	stroke(at-direction*0.29,tip,0.045,color)
+	stroke(at+side*0.18,tip,0.045,color)
+	stroke(at-side*0.18,tip,0.045,color)
 
 func make_board() -> void:
-	flat_rect(Vector3(0,0.18,0),Vector2(15.35,15.35),Color("18304a"))
-	flat_rect(Vector3(0,0.19,0),Vector2(15.05,15.05),Color("556071"))
+	flat_rect(Vector3(0,0.18,0),Vector2(15.08,15.08),Color("171c22"))
+	flat_rect(Vector3(0,0.19,0),Vector2(15.0,15.0),Color("171c22"))
 	var corners := [Vector2i(0,0), Vector2i(0,9), Vector2i(9,9), Vector2i(9,0)]
 	for seat in range(4):
 		var color: Color = BOARD_COLORS[BoardMath.COLORS[seat]]
 		var corner: Vector2i = corners[seat]
 		var center := Vector3(corner.y - 4.5, 0, corner.x - 4.5)
-		flat_rect(center+Vector3(0,0.20,0),Vector2(5.98,5.98),color)
+		flat_rect(center+Vector3(0,0.20,0),Vector2(5.98,5.98),Color("125b83") if seat == 3 else color)
 		# A printed outline and white inset, not a recessed tray or raised frame.
-		flat_rect(center+Vector3(0,0.202,0),Vector2(4.5,4.5),color.darkened(0.22)).name = "HomeRim%d" % seat
-		flat_rect(center+Vector3(0,0.204,0),Vector2(4.44,4.44),Color.WHITE).name = "HomeFloor%d" % seat
+		flat_rect(center+Vector3(0,0.202,0),Vector2(4.06,4.06),Color("171c22")).name = "HomeRim%d" % seat
+		flat_rect(center+Vector3(0,0.204,0),Vector2(4.0,4.0),Color.WHITE).name = "HomeFloor%d" % seat
 		for index in range(4):
 			var dock := BoardMath.world(BoardMath.COLORS[seat], 0, index)
 			dock.y = 0.206
-			disc(dock,0.37,color.lightened(0.60))
-			disc(dock+Vector3(0,0.002,0),0.29,color.lightened(0.83))
+			disc(dock,0.47,Color("171c22"))
+			disc(dock+Vector3(0,0.002,0),0.44,color)
 	for row in range(15):
 		for col in range(15):
 			if (row < 6 or row > 8) and (col < 6 or col > 8):
@@ -217,7 +213,7 @@ func make_board() -> void:
 				if coord == BoardMath.TRACK[seat * 13]:
 					color = BOARD_COLORS[BoardMath.COLORS[seat]]
 			var at := Vector3(col-7,0.20,row-7)
-			flat_rect(at,Vector2(0.975,0.975),color)
+			flat_rect(at,Vector2(0.978,0.978),color)
 			if BoardMath.TRACK.find(coord) in BoardMath.SAFE:
 				star(at+Vector3(0,0.002,0),color != Color.WHITE)
 	var middle := Vector3(0,0.20,0)
@@ -225,6 +221,9 @@ func make_board() -> void:
 	triangle([Vector3(-1.5,0.20,-1.5),middle,Vector3(1.5,0.20,-1.5)],BOARD_COLORS.sun)
 	triangle([Vector3(1.5,0.20,-1.5),middle,Vector3(1.5,0.20,1.5)],BOARD_COLORS.mint)
 	triangle([Vector3(-1.5,0.20,1.5),Vector3(1.5,0.20,1.5),middle],BOARD_COLORS.violet)
+	for x in [-1.5,1.5]:
+		for z in [-1.5,1.5]:
+			stroke(Vector3(0,0.202,0),Vector3(x,0.202,z),0.025,Color("171c22"))
 	arrow(Vector3(-7,0.202,0),Vector3.LEFT,BOARD_COLORS.coral)
 	arrow(Vector3(0,0.202,-7),Vector3.FORWARD,BOARD_COLORS.sun)
 	arrow(Vector3(7,0.202,0),Vector3.RIGHT,BOARD_COLORS.mint)
