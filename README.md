@@ -2,6 +2,33 @@
 
 Premium multiplayer Ludo MVP foundation for Android/web expansion.
 
+## Active migration: Godot + Kotlin
+
+The new game client is in [`apps/godot`](apps/godot/README.md), using Godot
+4.6.1 + GDScript with actual 3D board/pawn/dice geometry. The standalone Kotlin
+LiveKit Android plugin is in `apps/godot/android-plugin`. The Node.js server and
+TypeScript rules engine are retained. The spec's cream/forest/white/gold palette
+and four player cards are the new visual direction.
+
+```bash
+npm run godot:editor
+npm run godot
+npm run godot:test
+npm run web
+```
+
+This is a **migration preview**, not the completed product spec. The Kotlin
+bridge has not been compiled or device-tested; in-card video rendering, browser
+media, token issuance, reconnect recovery, stickers and production hardening
+remain pending. See the new client's README for exact build/run instructions.
+The live Firebase site and Expo deployment commands have deliberately not been
+switched until the new client is validated. The sections below describe the
+retained legacy Expo/Vite clients and their existing deployment.
+`npm run web` now opens the local Godot browser preview; `npm run expo:web`
+opens the retained Expo client. `build:web` and `deploy:web` still refer to the
+legacy Expo deployment—use `godot:build:web` and the explicit Godot Firebase
+config for the new client. Do not publish the preview as a completed production app.
+
 ## Run locally
 
 ```bash

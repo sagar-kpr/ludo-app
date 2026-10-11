@@ -17,3 +17,9 @@ playwright-report/
 coverage/
 *.tsbuildinfo
 .DS_Store
+.tools/
+**/.godot/
+**/.gradle/
+**/build/
+**/local.properties
+**/export_credentials.cfg

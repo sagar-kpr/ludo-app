@@ -59,9 +59,13 @@ it('rejects unknown codes and joins an existing room without creating another', 
   const hostStarted = receive(host, 'STATE');
   const guestStarted = receive(guest, 'STATE');
   host.send(JSON.stringify({ type: 'START_GAME' }));
-  let match = (await hostStarted).state;
+  const started = await hostStarted;
+  expect(started.turnDurationMs).toBe(60000);
+  expect(started.turnDeadline - started.serverTime).toBeGreaterThanOrEqual(59000);
+  let match = started.state;
   expect((await guestStarted).state).toEqual(match);
   expect(match.phase).toBe('rolling');
+  expect(match.players.map((player: { color: string }) => player.color)).toEqual(['coral', 'mint']);
   const badTurn = receive(guest, 'ERROR');
   guest.send(JSON.stringify({ type: 'ROLL_DICE' }));
   expect((await badTurn).message).toContain('not your turn');
@@ -75,6 +79,11 @@ it('rejects unknown codes and joins an existing room without creating another', 
     const guestNext = receive(guest, 'STATE');
     actor.send(JSON.stringify({ type: 'ROLL_DICE' }));
     const result = await roll;
+    if (n === 0) {
+      const premature = receive(actor, 'ERROR');
+      actor.send(JSON.stringify({ type: 'ROLL_DICE' }));
+      expect((await premature).message).toContain('animation');
+    }
     expect(result.value).toBeGreaterThanOrEqual(1);
     expect(result.value).toBeLessThanOrEqual(6);
     match = (await hostNext).state;

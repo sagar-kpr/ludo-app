@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "public": "apps/godot/dist",
+    "ignore": ["firebase.godot.json", "**/.*", "**/*.map"],
+    "headers": [
+      {"source": "**", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}]},
+      {"source": "/index.html", "headers": [{"key": "Cache-Control", "value": "no-cache"}]},
+      {"source": "**/*.wasm", "headers": [{"key": "Content-Type", "value": "application/wasm"}]}
+    ]
+  }
+}

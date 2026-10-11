@@ -1,4 +1,4 @@
-import { COLORS, HOME, type Color, type Token } from './index';
+import { COLORS, HOME, type Color, type Token } from './types';
 
 // Coordinates are [row, column] on a 15 × 15 board.
 export const TRACK: [number, number][] = [

@@ -1,6 +1,6 @@
-.real-dice{display:block;position:relative;width:43px;height:43px;border-radius:10px;background:linear-gradient(145deg,#fff,#eee5d7);border:1px solid #fff;box-shadow:0 3px 0 #d0c5b5,0 5px 8px #0004}
+.real-dice{display:block;position:relative;width:43px;height:43px;border-radius:10px;background:linear-gradient(145deg,#fff,#eee5d7);border:1px solid #fff;box-shadow:2px 5px 0 #c5bbaa,3px 8px 12px #0005,inset 1px 1px 1px #fff;transform-style:preserve-3d}
 .dice-pip{position:absolute;width:7px;height:7px;border-radius:50%;background:#252943;box-shadow:inset 0 1px 1px #0007}
 .real-dice.rolling{animation:dice-tumble 1.2s ease-in-out both}
-@keyframes dice-tumble{0%{transform:rotate(0) translateY(0)}15%{transform:rotate(-18deg) translateY(-6px) scale(1.08)}45%{transform:rotate(140deg) translateY(-3px)}70%{transform:rotate(315deg) translateY(-5px) scale(1.02)}85%,100%{transform:rotate(360deg) translateY(0) scale(1)}}
+@keyframes dice-tumble{0%{transform:perspective(400px) rotateX(0) rotateY(0) rotate(0)}15%{transform:perspective(400px) rotateX(-22deg) rotateY(24deg) rotate(-18deg) translateY(-6px) scale(1.08)}45%{transform:perspective(400px) rotateX(18deg) rotateY(-18deg) rotate(140deg) translateY(-3px)}70%{transform:perspective(400px) rotateX(-12deg) rotateY(12deg) rotate(315deg) translateY(-5px) scale(1.02)}85%,100%{transform:perspective(400px) rotateX(0) rotateY(0) rotate(360deg) translateY(0) scale(1)}}
 .dice-button[style],.dice-button.ready[style]{background:var(--turn-color,#ff6e73);color:#fff;box-shadow:0 10px 25px color-mix(in srgb,var(--turn-color,#ff6e73) 25%,transparent);transition:background-color .3s ease,box-shadow .3s ease}
 @media(prefers-reduced-motion:reduce){.real-dice.rolling{animation:none}}

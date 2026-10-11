@@ -1,0 +1,693 @@
+extends Control
+
+const Design = preload("res://scripts/design.gd")
+const Realtime = preload("res://scripts/realtime.gd")
+const Board = preload("res://scripts/board.gd")
+const PlayerCard = preload("res://scripts/player_card.gd")
+const GameBackground = preload("res://scripts/game_background.gd")
+const Feedback = preload("res://scripts/feedback.gd")
+const ChatBubbles = preload("res://scripts/chat_bubbles.gd")
+const StickerArt = preload("res://scripts/sticker_art.gd")
+const StickerEffect = preload("res://scripts/sticker_effect.gd")
+var feedback
+var chat_bubbles
+var network
+var board
+var content: VBoxContainer
+var home: VBoxContainer
+var lobby: VBoxContainer
+var game_view: VBoxContainer
+var status: Label
+var notice: Label
+var name_input: LineEdit
+var join_input: LineEdit
+var room_label: Label
+var lobby_players: Label
+var create_button: Button
+var join_button: Button
+var start_button: Button
+var cards: Array = []
+var game: Dictionary = {}
+var self_id := ""
+var room_code := ""
+var online := false
+var pending := false
+var presenting := false
+var awaiting_move_state := false
+var processing_events := false
+var events: Array[Dictionary] = []
+var latest_version := -1
+var chat_log: RichTextLabel
+var chat_input: LineEdit
+var chat_dialog: AcceptDialog
+var menu: AcceptDialog
+var result: AcceptDialog
+var result_stats: Label
+var restart_button: Button
+var connection_detail := "Connecting…"
+var config := ConfigFile.new()
+var reduced_motion := false
+var endpoint := ""
+var media_status: Label
+var game_background
+var brand_label: Label
+var turn_deadline_ticks := 0
+var turn_duration_ms := 60000
+var sticker_picker: PopupPanel
+var sticker_target := ""
+var sticker_layer: Control
+var sticker_title: Label
+
+func _process(_delta: float) -> void:
+	if board and board.enabled and turn_deadline_ticks > 0 and Time.get_ticks_msec() >= turn_deadline_ticks:
+		refresh_controls()
+
+func _ready() -> void:
+	theme = Design.make_theme()
+	config.load("user://preferences.cfg")
+	reduced_motion = bool(config.get_value("accessibility", "reduced_motion", false))
+	endpoint = str(ProjectSettings.get_setting("rally/realtime_url"))
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--server="):
+			endpoint = argument.trim_prefix("--server=")
+	build_ui()
+	feedback = Feedback.new()
+	add_child(feedback)
+	feedback.sound_enabled = bool(config.get_value("feedback","sound",true))
+	feedback.haptics_enabled = bool(config.get_value("feedback","haptics",true))
+	board.step_landed.connect(func(id: String): feedback.cue("step",id.begins_with(self_id+"-")))
+	board.token_captured.connect(func(mover: String, captured: String): feedback.cue("capture",mover.begins_with(self_id+"-") or captured.begins_with(self_id+"-")))
+	for card in cards:
+		card.gift_pressed.connect(open_sticker_picker)
+		card.chat_pressed.connect(open_table_chat)
+		card.camera_pressed.connect(func(): menu.popup_centered())
+		card.dice.roll_contact.connect(func(settled: bool, strength: float):
+			feedback.cue("dice_settle" if settled else "dice",card.player_id == self_id,strength)
+		)
+	network = Realtime.new()
+	add_child(network)
+	network.event_received.connect(_receive)
+	network.connection_changed.connect(func(connected: bool, detail: String):
+		online = connected
+		connection_detail = detail
+		if not online:
+			pending = false
+		refresh_controls()
+	)
+	network.connect_server(endpoint)
+	if Engine.has_singleton("RallyMedia"):
+		var media = Engine.get_singleton("RallyMedia")
+		media.connect("media_status", func(_state: String, message: String): media_status.text = message)
+	get_viewport().size_changed.connect(_safe_area)
+	_safe_area()
+
+func _safe_area() -> void:
+	var inset_top := 8
+	var inset_bottom := 8
+	if OS.get_name() == "Android":
+		var safe := DisplayServer.get_display_safe_area()
+		var screen := DisplayServer.screen_get_size()
+		var ratio := get_viewport_rect().size.y / maxf(screen.y, 1)
+		inset_top = maxi(12, int(safe.position.y * ratio))
+		inset_bottom = maxi(12, int((screen.y - safe.end.y) * ratio))
+	var margin := get_node("SafeArea") as MarginContainer
+	margin.add_theme_constant_override("margin_top", inset_top)
+	margin.add_theme_constant_override("margin_bottom", inset_bottom)
+	margin.add_theme_constant_override("margin_left",4)
+	margin.add_theme_constant_override("margin_right",4)
+	content.custom_minimum_size.x = minf(760, get_viewport_rect().size.x - 8)
+	if is_instance_valid(board):
+		# Size using the actual card rows now that the dice is larger.
+		var card_rows: float = game_view.get_child(0).get_combined_minimum_size().y + game_view.get_child(2).get_combined_minimum_size().y
+		var panels: float = card_rows+8
+		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + panels + inset_top + inset_bottom + 12
+		# Match the near-overhead camera's full board/token envelope. A taller
+		# empty viewport used to add blank space above the board instead of size.
+		board.custom_minimum_size.y = minf(content.custom_minimum_size.x*1.08,maxf(180,get_viewport_rect().size.y-chrome))
+
+func label(text: String, font_size: int = 15, color: Color = Design.INK) -> Label:
+	var item := Label.new()
+	item.text = text
+	item.add_theme_font_size_override("font_size", font_size)
+	if font_size >= 19:
+		var emphasis := FontVariation.new()
+		emphasis.base_font = ThemeDB.fallback_font
+		emphasis.variation_embolden = 0.55
+		item.add_theme_font_override("font", emphasis)
+	item.add_theme_color_override("font_color", color)
+	item.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return item
+
+func button(text: String, action: Callable) -> Button:
+	var item := Button.new()
+	item.text = text
+	item.custom_minimum_size.y = 48
+	item.pressed.connect(action)
+	item.resized.connect(func(): item.pivot_offset = item.size*0.5)
+	item.button_down.connect(func():
+		if not reduced_motion:
+			item.create_tween().tween_property(item,"scale",Vector2(0.97,0.97),0.09).set_trans(Tween.TRANS_SINE)
+	)
+	item.button_up.connect(func():
+		if reduced_motion:
+			item.scale = Vector2.ONE
+		else:
+			item.create_tween().tween_property(item,"scale",Vector2.ONE,0.15).set_trans(Tween.TRANS_SINE)
+	)
+	return item
+
+func panel(parent: Node) -> VBoxContainer:
+	var card := PanelContainer.new()
+	parent.add_child(card)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	card.add_child(column)
+	return column
+
+func build_ui() -> void:
+	var background := ColorRect.new()
+	background.color = Design.CREAM
+	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(background)
+	game_background = GameBackground.new()
+	game_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	game_background.hide()
+	add_child(game_background)
+	var safe := MarginContainer.new()
+	safe.name = "SafeArea"
+	safe.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	safe.add_theme_constant_override("margin_left", 16)
+	safe.add_theme_constant_override("margin_right", 16)
+	add_child(safe)
+	var center := HBoxContainer.new()
+	center.alignment = BoxContainer.ALIGNMENT_CENTER
+	safe.add_child(center)
+	content = VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	content.add_theme_constant_override("separation", 6)
+	center.add_child(content)
+	var header := HBoxContainer.new()
+	content.add_child(header)
+	var brand := label("Rally Ludo", 14, Design.INK)
+	brand_label = brand
+	brand.autowrap_mode = TextServer.AUTOWRAP_OFF
+	header.add_child(brand)
+	status = label("Connecting…", 11, Design.MUTED)
+	status.autowrap_mode = TextServer.AUTOWRAP_OFF
+	status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	header.add_child(status)
+	# Only home/lobby scroll. The board and player cards stay fixed during play.
+	var scroll := ScrollContainer.new()
+	scroll.name = "SetupScroll"
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(scroll)
+	var setup := VBoxContainer.new()
+	setup.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	setup.add_theme_constant_override("separation", 14)
+	scroll.add_child(setup)
+	home = VBoxContainer.new()
+	home.add_theme_constant_override("separation", 18)
+	setup.add_child(home)
+	home.add_child(label("Play with friends", 32, Design.INK))
+	home.add_child(label("Create a room or join with a code. No account needed.", 16, Design.MUTED))
+	var home_card := panel(home)
+	home_card.add_child(label("Your player name", 14, Design.MUTED))
+	name_input = LineEdit.new()
+	name_input.placeholder_text = "Guest"
+	name_input.max_length = 18
+	name_input.text = str(config.get_value("player", "name", ""))
+	name_input.custom_minimum_size.y = 48
+	home_card.add_child(name_input)
+	create_button = button("Create a private room", func(): request_room(false))
+	home_card.add_child(create_button)
+	join_input = LineEdit.new()
+	join_input.placeholder_text = "Friend’s room code"
+	join_input.max_length = 9
+	join_input.custom_minimum_size.y = 48
+	home_card.add_child(join_input)
+	join_button = button("Join with code", func(): request_room(true))
+	home_card.add_child(join_button)
+	home.add_child(label("Guest friendly  ·  Android + web  ·  2–4 players", 12, Design.MUTED))
+	lobby = VBoxContainer.new()
+	lobby.add_theme_constant_override("separation", 16)
+	lobby.hide()
+	setup.add_child(lobby)
+	lobby.add_child(label("Your room", 28, Design.INK))
+	var lobby_card := panel(lobby)
+	lobby_card.add_child(label("PRIVATE ROOM", 12, Design.MUTED))
+	room_label = label("", 32, Design.FOREST)
+	lobby_card.add_child(room_label)
+	lobby_card.add_child(button("Copy room code", func():
+		DisplayServer.clipboard_set(room_code)
+		notice.text = "Room code copied. Send it to your friends."
+	))
+	lobby_players = label("", 17)
+	lobby_card.add_child(lobby_players)
+	start_button = button("Start game", func(): send({"type":"START_GAME"}))
+	lobby.add_child(start_button)
+	lobby.add_child(label("The host can start with 2–4 friends. Everyone uses the same room code.", 14, Design.MUTED))
+	game_view = VBoxContainer.new()
+	game_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	game_view.add_theme_constant_override("separation", 4)
+	game_view.alignment = BoxContainer.ALIGNMENT_BEGIN
+	game_view.hide()
+	content.add_child(game_view)
+	cards.resize(4)
+	for pair in range(2):
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		game_view.add_child(row)
+		for slot in range(2):
+			var seat := slot if pair == 0 else 3 - slot
+			var card := PlayerCard.new()
+			row.add_child(card)
+			cards[seat] = card
+			card.roll_pressed.connect(func(): send({"type":"ROLL_DICE"}))
+			card.invite_pressed.connect(func():
+				DisplayServer.clipboard_set(room_code)
+				notice.text = "Room code copied. Share it with a friend."
+			)
+		if pair == 0:
+			board = Board.new()
+			board.reduced_motion = reduced_motion
+			game_view.add_child(board)
+			board.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			board.token_pressed.connect(func(id: String): send({"type":"MOVE_TOKEN", "tokenId":id}))
+	notice = label("", 12, Design.MUTED)
+	content.add_child(notice)
+	build_dialogs()
+	chat_bubbles = ChatBubbles.new()
+	chat_bubbles.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(chat_bubbles)
+	sticker_layer = Control.new()
+	sticker_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sticker_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sticker_layer.z_index = 30
+	add_child(sticker_layer)
+
+func build_dialogs() -> void:
+	chat_dialog = AcceptDialog.new()
+	chat_dialog.title = "Table chat"
+	chat_dialog.min_size = Vector2i(280, 320)
+	add_child(chat_dialog)
+	var chat_column := VBoxContainer.new()
+	chat_dialog.add_child(chat_column)
+	chat_log = RichTextLabel.new()
+	chat_log.bbcode_enabled = false
+	chat_log.custom_minimum_size = Vector2(260,180)
+	chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_log.scroll_following = true
+	chat_column.add_child(chat_log)
+	chat_input = LineEdit.new()
+	chat_input.placeholder_text = "Say something…"
+	chat_input.max_length = 240
+	chat_input.custom_minimum_size.y = 48
+	chat_input.text_submitted.connect(func(_text: String): send_chat())
+	chat_column.add_child(chat_input)
+	chat_column.add_child(button("Send", send_chat))
+	menu = AcceptDialog.new()
+	menu.title = "Settings"
+	menu.min_size = Vector2i(280, 260)
+	add_child(menu)
+	var settings := VBoxContainer.new()
+	settings.add_theme_constant_override("separation",12)
+	menu.add_child(settings)
+	var motion := CheckButton.new()
+	motion.text = "Reduce motion"
+	motion.custom_minimum_size.y = 48
+	motion.button_pressed = reduced_motion
+	motion.toggled.connect(func(value: bool):
+		reduced_motion = value
+		board.reduced_motion = value
+		for pawn in board.pawns.values():
+			pawn.reduced_motion = value
+		for card in cards:
+			card.dice.reduced_motion = value
+		config.set_value("accessibility", "reduced_motion", value)
+		config.save("user://preferences.cfg")
+	)
+	settings.add_child(motion)
+	for kind in ["sound","haptics"]:
+		var toggle := CheckButton.new()
+		toggle.text = "Game sounds" if kind == "sound" else "Vibration (supported devices)"
+		toggle.button_pressed = bool(config.get_value("feedback",kind,true))
+		toggle.toggled.connect(func(value: bool):
+			if kind == "sound":
+				feedback.sound_enabled = value
+			else:
+				feedback.haptics_enabled = value
+			config.set_value("feedback",kind,value)
+			config.save("user://preferences.cfg")
+		)
+		settings.add_child(toggle)
+	media_status = label("Camera and voice are not configured in this migration build.", 13, Design.MUTED)
+	settings.add_child(media_status)
+	settings.add_child(button("Retry server connection", func():
+		if room_code.is_empty():
+			network.connect_server(endpoint)
+		else:
+			media_status.text = "Automatic match recovery is still pending. Keep this session open."
+	))
+	settings.add_child(label("Godot migration preview · Server-authoritative gameplay",12,Design.MUTED))
+	build_sticker_picker()
+	result = AcceptDialog.new()
+	result.title = "Match complete"
+	result.min_size = Vector2i(280,240)
+	add_child(result)
+	var results_column := VBoxContainer.new()
+	results_column.add_theme_constant_override("separation",16)
+	var results_panel := PanelContainer.new()
+	results_panel.add_theme_stylebox_override("panel",Design.surface(Design.CREAM,16))
+	result.add_child(results_panel)
+	results_panel.add_child(results_column)
+	result_stats = label("",14,Design.INK)
+	result_stats.autowrap_mode = TextServer.AUTOWRAP_OFF
+	results_column.add_child(result_stats)
+	restart_button = button("Restart game",func(): send({"type":"RESTART_GAME"}))
+	results_column.add_child(restart_button)
+	var results_footer := label("Same friends · Same room",12,Design.MUTED)
+	results_footer.autowrap_mode = TextServer.AUTOWRAP_OFF
+	results_column.add_child(results_footer)
+
+func build_sticker_picker() -> void:
+	sticker_picker = PopupPanel.new()
+	sticker_picker.add_theme_stylebox_override("panel",Design.surface(Color("f7f9ff"),16,Color("ffd34d")))
+	add_child(sticker_picker)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation",8)
+	sticker_picker.add_child(column)
+	var heading := HBoxContainer.new()
+	heading.custom_minimum_size.y = 28
+	heading.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	column.add_child(heading)
+	sticker_title = label("Send a sticker",15,Design.INK)
+	sticker_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	sticker_title.custom_minimum_size = Vector2(160,24)
+	sticker_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sticker_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sticker_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	heading.add_child(sticker_title)
+	var close := Button.new()
+	close.text = "×"
+	close.tooltip_text = "Close sticker picker"
+	close.custom_minimum_size = Vector2(28,28)
+	close.add_theme_font_size_override("font_size",20)
+	close.add_theme_color_override("font_color",Design.INK)
+	for state in ["normal","hover","pressed"]:
+		var style := Design.surface(Color("e9edf5"),8,Color("d9e2f2"))
+		style.content_margin_left = 3
+		style.content_margin_right = 3
+		style.content_margin_top = 0
+		style.content_margin_bottom = 0
+		close.add_theme_stylebox_override(state,style)
+	close.pressed.connect(func(): sticker_picker.hide())
+	heading.add_child(close)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation",6)
+	grid.add_theme_constant_override("v_separation",6)
+	column.add_child(grid)
+	for sticker in ["PARTY","CLAP","LOVE","LAUGH","FIRE","COOL","GIFT","TROPHY","HAMMER","BOOM","CROWN","CLOWN","PUNCH","KISS","TOMATO","EGG"]:
+		var choice := Button.new()
+		choice.text = sticker
+		choice.custom_minimum_size = Vector2(66,82)
+		choice.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		choice.add_theme_constant_override("outline_size",0)
+		choice.add_theme_font_size_override("font_size",11)
+		choice.add_theme_color_override("font_color",Design.INK)
+		choice.add_theme_color_override("font_hover_color",Design.INK)
+		choice.add_theme_color_override("font_pressed_color",Design.INK)
+		choice.add_theme_color_override("font_focus_color",Design.INK)
+		choice.add_theme_stylebox_override("normal",Design.surface(Color.WHITE,12,Color("d9e2f2")))
+		choice.add_theme_stylebox_override("hover",Design.surface(Color("fff5cb"),12,Color("ffd34d")))
+		var artwork := StickerArt.new()
+		artwork.kind = sticker
+		artwork.position = Vector2(4,2)
+		artwork.size = Vector2(58,58)
+		choice.add_child(artwork)
+		# Put the readable caption beneath the artwork.
+		var normal_style := Design.surface(Color.WHITE,12,Color("d9e2f2"))
+		normal_style.content_margin_top = 58
+		normal_style.content_margin_bottom = 5
+		choice.add_theme_stylebox_override("normal",normal_style)
+		var hover_style := normal_style.duplicate()
+		hover_style.bg_color = Color("fff5cb")
+		choice.add_theme_stylebox_override("hover",hover_style)
+		choice.add_theme_stylebox_override("pressed",hover_style)
+		choice.pressed.connect(func(): send_sticker(sticker))
+		grid.add_child(choice)
+
+func open_sticker_picker(target_player_id: String) -> void:
+	if not online or target_player_id.is_empty() or target_player_id == self_id:
+		return
+	sticker_target = ""
+	for player in game.get("players",[]):
+		if str(player.id) == target_player_id:
+			sticker_target = target_player_id
+			sticker_title.text = "Send to " + str(player.name)
+			break
+	if sticker_target.is_empty():
+		return
+	sticker_picker.reset_size()
+	sticker_picker.popup_centered()
+
+func open_table_chat() -> void:
+	for card in cards:
+		if card.player_id == self_id:
+			card.chat.unread = false
+	chat_dialog.popup_centered()
+
+func send_sticker(sticker: String) -> void:
+	if sticker_target.is_empty() or not online:
+		sticker_picker.hide()
+		return
+	if not network.send_intent({"type":"SEND_STICKER", "targetPlayerId":sticker_target, "sticker":sticker}):
+		notice.text = "Could not send sticker. Connection lost."
+		return
+	notice.text = "Sending " + sticker.to_lower() + "…"
+	sticker_picker.hide()
+	sticker_target = ""
+
+func show_sticker(event: Dictionary) -> void:
+	var recipient: Control = null
+	var sender: Control = null
+	var target_id := str(event.get("targetPlayerId",self_id))
+	for card in cards:
+		if card.player_id == target_id:
+			recipient = card
+		if card.player_id == str(event.get("fromPlayerId","")):
+			sender = card
+	if not recipient:
+		return
+	# Replace the previous effect for this recipient to avoid overlapping meshes.
+	for previous in sticker_layer.get_children():
+		if previous.get_meta("target_player_id","") == target_id:
+			previous.queue_free()
+	var effect := StickerEffect.new()
+	effect.kind = str(event.get("sticker","PARTY"))
+	effect.recipient = recipient
+	effect.sender = sender
+	effect.reduced_motion = reduced_motion
+	effect.set_meta("target_player_id",target_id)
+	effect.contact.connect(func(kind: String):
+		feedback.cue("sticker_hit" if kind in ["HAMMER","BOOM","PUNCH","TOMATO","EGG"] else "sticker_cheer",target_id == self_id)
+	)
+	sticker_layer.add_child(effect)
+	if str(event.get("fromPlayerId","")) == self_id:
+		notice.text = "Sticker delivered: " + effect.kind.to_lower()
+
+func request_room(join: bool) -> void:
+	var player_name := name_input.text.strip_edges()
+	if player_name.is_empty():
+		player_name = "Guest"
+	config.set_value("player", "name", player_name)
+	config.save("user://preferences.cfg")
+	var code := join_input.text.strip_edges().to_upper()
+	join_input.text = code
+	if join and code.is_empty():
+		notice.text = "Enter your friend’s room code first."
+		return
+	send({"type":"JOIN_ROOM", "code":code, "name":player_name} if join else {"type":"CREATE_ROOM", "name":player_name})
+
+func send(intent: Dictionary) -> void:
+	if pending or presenting:
+		return
+	if not online or not network.send_intent(intent):
+		notice.text = "Cannot reach the game server."
+		return
+	pending = true
+	refresh_controls()
+
+func send_chat() -> void:
+	var text := chat_input.text.strip_edges()
+	if not text.is_empty() and online and not room_code.is_empty():
+		if network.send_intent({"type":"CHAT", "text":text}):
+			chat_input.clear()
+
+func _receive(event: Dictionary) -> void:
+	if str(event.get("type","")) == "STATE":
+		var remaining := maxi(0,int(event.get("turnDeadline",0))-int(event.get("serverTime",0)))
+		event["deadlineTicks"] = Time.get_ticks_msec()+remaining if remaining > 0 else 0
+	# Social messages bypass dice/move animation waits, but keep server receipt order.
+	if str(event.get("type","")) == "CHAT":
+		receive_chat(event)
+		return
+	if str(event.get("type","")) == "STICKER":
+		show_sticker(event)
+		return
+	# A single ordered presentation queue prevents snapshots overtaking dice/moves.
+	events.append(event)
+	if not processing_events:
+		processing_events = true
+		drain_events()
+
+func drain_events() -> void:
+	while not events.is_empty():
+		var event: Dictionary = events.pop_front()
+		await present_event(event)
+	processing_events = false
+
+func present_event(event: Dictionary) -> void:
+	match str(event.type):
+		"CONNECTED":
+			self_id = str(event.playerId)
+		"ERROR":
+			pending = false
+			notice.text = str(event.message)
+		"ROOM_CREATED", "ROOM_JOINED":
+			room_code = str(event.roomCode)
+			room_label.text = room_code
+			pending = false
+			home.hide()
+			lobby.show()
+		"STATE":
+			var snapshot: Dictionary = event.state
+			if int(snapshot.get("version",0)) < latest_version:
+				return
+			latest_version = int(snapshot.get("version",0))
+			game = snapshot
+			turn_deadline_ticks = int(event.get("deadlineTicks",0))
+			turn_duration_ms = int(event.get("turnDurationMs",60000))
+			pending = false
+			show_state()
+			# TOKEN_MOVED is followed by this authoritative snapshot. Do not
+			# re-enable input against the previous legal-pawn state in between.
+			if awaiting_move_state:
+				awaiting_move_state = false
+				presenting = false
+		"DICE_ROLLED":
+			presenting = true
+			pending = false
+			refresh_controls()
+			board.highlight_player(str(event.color))
+			notice.text = "Rolling…"
+			var roller = null
+			for card in cards:
+				if card.player_id == str(event.playerId):
+					roller = card
+			if roller:
+				roller.dice.reduced_motion = reduced_motion
+				await roller.dice.animate_roll(int(event.value))
+			else:
+				await get_tree().create_timer(1.2).timeout
+			notice.text = "Rolled a %d" % int(event.value)
+			if roller:
+				roller.status_label.text = notice.text
+			notice.text += " · " + ("No legal move; next player." if event.get("skipped",false) else "Moving the only legal pawn." if event.get("automatic",false) else "Choose a highlighted pawn.")
+			presenting = false
+		"TOKEN_MOVED":
+			presenting = true
+			awaiting_move_state = true
+			refresh_controls()
+			await board.animate_move(event)
+			pending = false
+			notice.text = "Move complete."
+		"CHAT":
+			receive_chat(event)
+	refresh_controls()
+
+func receive_chat(event: Dictionary) -> void:
+	var sender := str(event.get("name","Guest"))
+	chat_log.append_text(sender+": "+str(event.text)+"\n")
+	chat_bubbles.reduced_motion = reduced_motion
+	for card in cards:
+		if card.player_id == str(event.get("playerId","")):
+			chat_bubbles.show_message(card,sender,str(event.text))
+			break
+	if str(event.get("playerId","")) != self_id:
+		feedback.cue("chat")
+		if not chat_dialog.visible:
+			for card in cards:
+				if card.player_id == self_id:
+					card.chat.unread = true
+
+func show_state() -> void:
+	var is_lobby: bool = game.get("phase") == "lobby"
+	home.hide()
+	lobby.visible = is_lobby
+	content.get_node("SetupScroll").visible = is_lobby
+	game_view.visible = not is_lobby
+	game_background.visible = not is_lobby
+	brand_label.add_theme_color_override("font_color",Color("f3f7ff") if not is_lobby else Design.INK)
+	notice.add_theme_color_override("font_color",Color("c2d6ef") if not is_lobby else Design.MUTED)
+	var players: Array = game.get("players",[])
+	var player_lines := PackedStringArray()
+	for seat in range(4):
+		var player: Dictionary = players[seat] if seat < players.size() else {}
+		player_lines.append("%s · %s%s" % [str(player.get("name","Waiting for friend")), Design.COLOR_NAMES.get(player.get("color",""),"Empty seat"), " · Host" if seat == 0 else ""])
+	lobby_players.text = "\n\n".join(player_lines)
+	board.apply_state(game,self_id)
+	if game.get("phase") == "finished":
+		var order: Array = game.get("finishOrder",[game.get("winner","")])
+		var lines := PackedStringArray()
+		for rank in range(order.size()):
+			for player in players:
+				if player.id == order[rank]:
+					var home_count := 0
+					for token in game.get("tokens",[]):
+						if token.color == player.color and int(token.position) == 58:
+							home_count += 1
+					lines.append("%s  %s · %d/4 home" % [["1st","2nd","3rd","4th"][rank],str(player.name),home_count])
+		result_stats.text = "\n\n".join(lines)
+		restart_button.visible = not players.is_empty() and players[0].id == self_id
+		if not result.visible:
+			chat_dialog.hide()
+			menu.hide()
+			result.popup_centered()
+	else:
+		result.hide()
+
+func refresh_controls() -> void:
+	if not is_instance_valid(status):
+		return
+	status.text = connection_detail + (" · Room " + room_code if not room_code.is_empty() else "")
+	status.add_theme_color_override("font_color", Color("c2d6ef") if game_view.visible else Design.MUTED if online else Design.FOREST)
+	create_button.disabled = not online or pending
+	join_button.disabled = not online or pending
+	var players: Array = game.get("players",[])
+	restart_button.disabled = not online or pending or presenting
+	start_button.visible = not players.is_empty() and players[0].id == self_id
+	start_button.disabled = not online or pending or players.size() < 2
+	var can_act := online and not pending and not presenting and (turn_deadline_ticks == 0 or Time.get_ticks_msec() < turn_deadline_ticks)
+	board.enabled = can_act
+	for pawn in board.pawns.values():
+		pawn.selection_enabled = can_act
+	for seat in range(4):
+		# Player order controls turns; color controls the matching board corner.
+		var player: Dictionary = {}
+		for candidate in players:
+			if candidate.get("color","") == ["coral","sun","mint","violet"][seat]:
+				player = candidate
+				break
+		var active: bool = not player.is_empty() and player.id == game.get("currentPlayer") and game.get("phase") in ["rolling","moving"]
+		var own: bool = not player.is_empty() and player.id == self_id
+		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own)
+		cards[seat].set_clock(turn_deadline_ticks,turn_duration_ms,active and not presenting,own)
+		var rank: int = game.get("finishOrder",[]).find(player.get("id",""))
+		if rank >= 0:
+			cards[seat].status_label.text = ["1st","2nd","3rd","4th"][rank]
+	_safe_area()

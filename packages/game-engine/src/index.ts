@@ -1,27 +1,13 @@
 import { SAFE_CELLS, trackIndex } from './board';
-export type Color = 'coral' | 'sun' | 'mint' | 'violet';
-export type Token = { id: string; color: Color; position: number };
-export type Player = { id: string; name: string; color: Color; ready: boolean };
-export type GameState = {
-  players: Player[];
-  tokens: Token[];
-  currentPlayer: string;
-  dice: number | null;
-  phase: 'lobby' | 'rolling' | 'moving' | 'finished';
-  winner?: string;
-  version: number;
-};
-
-export const COLORS: Color[] = ['coral', 'sun', 'mint', 'violet'];
-export const PATH_LENGTH = 57;
-export const HOME = 58;
+import { HOME, type Token, type Player, type GameState } from './types';
+export * from './types';
 
 export function createGame(players: Player[]): GameState {
   const active = players.slice(0, 4);
   return {
     players: active,
     tokens: active.flatMap((player) => [0, 1, 2, 3].map((n) => ({ id: `${player.id}-${n}`, color: player.color, position: 0 }))),
-    currentPlayer: active[0]?.id ?? '', dice: null, phase: 'lobby', version: 0,
+    currentPlayer: active[0]?.id ?? '', dice: null, phase: 'lobby', version: 0, finishOrder: [],
   };
 }
 
@@ -30,12 +16,12 @@ export function rollDice(state: GameState, random = Math.random): GameState {
   const dice = Math.floor(random() * 6) + 1;
   const color = state.players.find((p) => p.id === state.currentPlayer)?.color;
   const movable = state.tokens.some((token) => token.color === color && canMove(token, dice));
-  const nextPlayer = state.players[(state.players.findIndex((p) => p.id === state.currentPlayer) + 1) % state.players.length];
-  return { ...state, dice: movable ? dice : null, phase: movable ? 'moving' : 'rolling', currentPlayer: movable ? state.currentPlayer : nextPlayer.id, version: state.version + 1 };
+  return { ...state, dice: movable ? dice : null, phase: movable ? 'moving' : 'rolling', currentPlayer: movable ? state.currentPlayer : nextUnfinishedPlayer(state), version: state.version + 1 };
 }
 
 export function canMove(token: Token, dice: number | null): boolean {
   if (!dice) return false;
+	if (token.position >= HOME) return false;
   if (token.position === 0) return dice === 6;
   return token.position + dice <= HOME;
 }
@@ -64,9 +50,26 @@ export function moveToken(state: GameState, tokenId: string): GameState {
   });
   const won = tokens.filter((item) => item.color === token.color && item.position === HOME).length === 4;
   const rolledSix = state.dice === 6;
-  const currentIndex = state.players.findIndex((p) => p.id === state.currentPlayer);
-  const nextPlayer = state.players[(currentIndex + 1) % state.players.length];
-  return { ...state, tokens, dice: null, phase: won ? 'finished' : 'rolling', winner: won ? state.currentPlayer : undefined, currentPlayer: rolledSix || captured || nextPosition === HOME || won ? state.currentPlayer : nextPlayer.id, version: state.version + 1 };
+  const finishOrder = [...(state.finishOrder ?? [])];
+  if (won && !finishOrder.includes(state.currentPlayer)) finishOrder.push(state.currentPlayer);
+  const finished = finishOrder.length >= state.players.length - 1;
+  if (finished) for (const player of state.players) if (!finishOrder.includes(player.id)) finishOrder.push(player.id);
+  const ranked = { ...state, finishOrder };
+  return { ...ranked, tokens, dice: null, phase: finished ? 'finished' : 'rolling', winner: finishOrder[0], currentPlayer: finished ? state.currentPlayer : !won && (rolledSix || captured || nextPosition === HOME) ? state.currentPlayer : nextUnfinishedPlayer(ranked), version: state.version + 1 };
+}
+
+export function nextUnfinishedPlayer(state: GameState): string {
+  const current = state.players.findIndex(player => player.id === state.currentPlayer);
+  for (let offset = 1; offset <= state.players.length; offset++) {
+    const player = state.players[(current + offset) % state.players.length];
+    if (!(state.finishOrder ?? []).includes(player.id)) return player.id;
+  }
+  return state.currentPlayer;
+}
+
+export function restartGame(state: GameState): GameState {
+  if (state.phase !== 'finished') return state;
+  return { ...createGame(state.players), phase: 'rolling', version: state.version + 1 };
 }
 
 export function startGame(state: GameState): GameState {
