@@ -23,7 +23,7 @@ export function canMove(token: Token, dice: number | null): boolean {
   if (!dice) return false;
 	if (token.position >= HOME) return false;
   if (token.position === 0) return dice === 6;
-  return token.position + dice <= HOME;
+  return true;
 }
 
 export function autoMoveToken(state: GameState): Token | undefined {
@@ -37,7 +37,7 @@ export function moveToken(state: GameState, tokenId: string): GameState {
   if (state.phase !== 'moving' || !state.dice) return state;
   const token = state.tokens.find((item) => item.id === tokenId);
   if (!token || token.color !== state.players.find((p) => p.id === state.currentPlayer)?.color || !canMove(token, state.dice)) return state;
-  const nextPosition = token.position === 0 ? 1 : token.position + state.dice;
+  const nextPosition = token.position === 0 ? 1 : Math.min(HOME, token.position + state.dice);
   const destination = trackIndex({ ...token, position: nextPosition });
   let captured = false;
   const tokens = state.tokens.map((item) => {
@@ -71,6 +71,28 @@ export function restartGame(state: GameState): GameState {
   if (state.phase !== 'finished') return state;
   return { ...createGame(state.players), phase: 'rolling', version: state.version + 1 };
 }
+
+export function removePlayer(state: GameState, playerId: string): GameState {
+  const departed = state.players.find(player => player.id === playerId);
+  if (!departed) return state;
+  const players = state.players.filter(player => player.id !== playerId);
+  const tokens = state.tokens.filter(token => token.color !== departed.color);
+  const finishOrder = (state.finishOrder ?? []).filter(id => id !== playerId);
+  const remaining = players.filter(player => !finishOrder.includes(player.id));
+  const finished = state.phase !== 'lobby' && remaining.length <= 1;
+  if (finished) finishOrder.push(...remaining.map(player => player.id));
+  const index = state.players.findIndex(player => player.id === playerId);
+  const following = state.players.slice(index + 1).concat(state.players.slice(0, index));
+  const currentPlayer = state.currentPlayer === playerId
+    ? (following.find(player => !finishOrder.includes(player.id))?.id ?? players[0]?.id ?? '')
+    : state.currentPlayer;
+  return { ...state, players, tokens, finishOrder,
+    currentPlayer: finished ? (finishOrder[0] ?? '') : currentPlayer,
+    phase: finished ? 'finished' : state.currentPlayer === playerId && state.phase !== 'lobby' ? 'rolling' : state.phase,
+    dice: finished || state.currentPlayer === playerId ? null : state.dice,
+    winner: finished ? finishOrder[0] : undefined, version: state.version + 1 };
+}
+
 
 export function startGame(state: GameState): GameState {
   if (state.players.length < 2 || state.phase !== 'lobby') return state;

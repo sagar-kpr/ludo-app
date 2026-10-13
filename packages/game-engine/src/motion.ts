@@ -1,7 +1,7 @@
 import { tokenCoordinate } from './board';
 import type { Token } from './index';
 
-export const STEP_MS = 160;
+export const STEP_MS = 240;
 
 // This describes visuals only; dice, turn order and move selection are unchanged.
 export function moveWaypoints(token: Token, from: number, index: number): [number, number][] {

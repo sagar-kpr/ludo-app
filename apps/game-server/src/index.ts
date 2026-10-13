@@ -2,18 +2,20 @@ import 'dotenv/config';
 import { randomBytes, randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { autoMoveToken, createGame, moveToken, rollDice, startGame, restartGame, type Color, type GameState, type Player } from '../../../packages/game-engine/src/index';
+import { autoMoveToken, createGame, moveToken, rollDice, startGame, restartGame, removePlayer, type Color, type GameState, type Player } from '../../../packages/game-engine/src/index';
 import { STEP_MS } from '../../../packages/game-engine/src/motion';
 import { DICE_ROLL_MS } from '../../../packages/shared/src/dice';
 import { persistChat, persistRoom, persistenceEnabled } from './persistence';
 import { expireTurn } from './turn-clock';
 
-type ClientMessage = { type: 'CREATE_ROOM'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
-type Client = { socket: WebSocket; playerId: string; roomCode?: string };
+type ClientMessage = { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
+type Client = { socket: WebSocket; playerId: string; sessionToken: string; roomCode?: string; disconnectTimer?: ReturnType<typeof setTimeout> };
 type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number };
 const configuredTurnMs = Number(process.env.TURN_TIMEOUT_MS || 60000);
 const turnDurationMs = Number.isFinite(configuredTurnMs) ? Math.max(1000, Math.min(120000, configuredTurnMs)) : 60000;
 const rooms = new Map<string, Room>();
+const sessions = new Map<string, Client>();
+const reconnectGraceMs = Math.max(500, Number(process.env.RECONNECT_GRACE_MS) || 90000);
 // The first two players occupy diagonal corners; later joins fill the others.
 const colors: Color[] = ['coral', 'mint', 'sun', 'violet'];
 const id = (prefix: string) => `${prefix}_${randomBytes(8).toString('hex')}`;
@@ -21,6 +23,10 @@ const code = () => `${randomBytes(2).toString('hex').toUpperCase()}-${randomByte
 const send = (socket: WebSocket, data: unknown) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(data)); };
 const publish = (room: Room, data: unknown) => room.clients.forEach((client) => send(client.socket, data));
 const state = (room: Room) => publish(room, { type: 'STATE', roomCode: room.code, state: room.state, players: room.players, serverTime: Date.now(), turnDeadline: room.turnDeadline || 0, turnDurationMs });
+function syncState(client: Client) {
+  const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
+  if (room) send(client.socket, { type: 'STATE', roomCode: room.code, state: room.state, players: room.players, serverTime: Date.now(), turnDeadline: room.turnDeadline || 0, turnDurationMs, recovered: true });
+}
 function resetClock(room: Room) {
   room.turnDeadline = room.state.phase === 'lobby' || room.state.phase === 'finished' ? 0 : Math.max(Date.now(), room.busyUntil) + turnDurationMs;
 }
@@ -47,8 +53,8 @@ function joinRoom(client: Client, value: string, name: string) {
   if (!room) return fail(client.socket, 'Room not found. Check the invite code.');
   if (room.players.length >= 4) return fail(client.socket, 'This room is full.');
   if (room.state.phase !== 'lobby') return fail(client.socket, 'This match has already started.');
-  const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors[room.players.length], ready: true };
-  room.players.push(player); room.state = createGame(room.players); room.clients.set(client.playerId, client); client.roomCode = room.code; void persistRoom(room.code, room.players, room.state); send(client.socket, { type: 'ROOM_JOINED', roomCode: room.code, playerId: client.playerId }); state(room);
+  const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors.find(color => !room.players.some(player => player.color === color))!, ready: true };
+  room.players.push(player); room.state = { ...createGame(room.players), version: room.state.version + 1 }; room.clients.set(client.playerId, client); client.roomCode = room.code; void persistRoom(room.code, room.players, room.state); send(client.socket, { type: 'ROOM_JOINED', roomCode: room.code, playerId: client.playerId }); state(room);
 }
 function applyMove(room: Room, tokenId: string, automatic = false, presentationMs = DICE_ROLL_MS) {
   const previous = room.state;
@@ -67,11 +73,14 @@ function applyMove(room: Room, tokenId: string, automatic = false, presentationM
   return true;
 }
 function handle(client: Client, message: ClientMessage) {
+  if (message.type === 'PING') { send(client.socket, { type: 'PONG', serverTime: Date.now() }); return; }
+  if (message.type === 'SYNC_STATE') { syncState(client); return; }
   if (message.type === 'CREATE_ROOM') return createRoom(client, message.name);
   if (message.type === 'JOIN_ROOM') return joinRoom(client, message.code, message.name);
   if (!client.roomCode) return fail(client.socket, 'Join a room first.');
   const room = rooms.get(client.roomCode); if (!room) return fail(client.socket, 'Room expired.');
   if (message.type === 'RESTART_GAME') {
+    if (room.players.length < 2) return fail(client.socket, 'At least two players are required.');
     if (room.players[0].id !== client.playerId) return fail(client.socket, 'Only the host can restart the match.');
     if (room.state.phase !== 'finished') return fail(client.socket, 'Finish the match before restarting.');
     if (Date.now() < room.busyUntil) return fail(client.socket, 'Wait for the final move to finish.');
@@ -119,5 +128,49 @@ function handle(client: Client, message: ClientMessage) {
 }
 const http = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ service: 'rally-ludo-realtime', rooms: rooms.size })); });
 const wss = new WebSocketServer({ server: http });
-wss.on('connection', (socket) => { const client: Client = { socket, playerId: id('guest') }; send(socket, { type: 'CONNECTED', playerId: client.playerId }); socket.on('message', (raw) => { try { handle(client, JSON.parse(raw.toString()) as ClientMessage); } catch { fail(socket, 'Invalid message.'); } }); socket.on('close', () => { if (client.roomCode) rooms.get(client.roomCode)?.clients.delete(client.playerId); }); });
+const alive = new WeakSet<WebSocket>();
+setInterval(() => {
+  for (const socket of wss.clients) {
+    if (!alive.has(socket)) { socket.terminate(); continue; }
+    alive.delete(socket);
+    socket.ping();
+  }
+}, 15000).unref();
+wss.on('connection', (socket, request) => {
+  alive.add(socket);
+  socket.on('pong', () => alive.add(socket));
+  const token = new URL(request.url || '/', 'http://localhost').searchParams.get('session');
+  const existing = token ? sessions.get(token) : undefined;
+  const client: Client = existing ?? { socket, playerId: id('guest'), sessionToken: randomBytes(24).toString('hex') };
+  if (client.disconnectTimer) clearTimeout(client.disconnectTimer);
+  const previousSocket = client.socket;
+  client.socket = socket;
+  sessions.set(client.sessionToken, client);
+  if (previousSocket !== socket) previousSocket.close();
+  const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
+  if (room) room.clients.set(client.playerId, client);
+  send(socket, { type: 'CONNECTED', playerId: client.playerId, sessionToken: client.sessionToken, resumed: Boolean(room), recoveryAvailable: true });
+  syncState(client);
+  socket.on('message', raw => { if (client.socket !== socket) return; try { handle(client, JSON.parse(raw.toString()) as ClientMessage); } catch { fail(socket, 'Invalid message.'); } });
+  socket.on('close', () => {
+    const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
+    if (client.socket !== socket) return;
+    room?.clients.delete(client.playerId);
+    client.disconnectTimer = setTimeout(() => {
+      sessions.delete(client.sessionToken);
+      if (!room) return;
+      const turnDeparted = room.state.currentPlayer === client.playerId;
+      room.state = removePlayer(room.state, client.playerId);
+      room.players = room.state.players;
+      if (!room.players.length) { rooms.delete(room.code); return; }
+      if (room.state.phase === 'finished' || turnDeparted) {
+        room.busyUntil = 0;
+        resetClock(room);
+      }
+      void persistRoom(room.code, room.players, room.state);
+      state(room);
+    }, reconnectGraceMs);
+    client.disconnectTimer.unref();
+  });
+});
 const port = Number(process.env.PORT || 8787); http.listen(port, () => console.log(`Rally Ludo realtime server listening on http://localhost:${port} (${persistenceEnabled() ? 'Supabase persistence on' : 'local persistence only'})`));

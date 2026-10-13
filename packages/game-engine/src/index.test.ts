@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { autoMoveToken, canMove, createGame, moveToken, rollDice, startGame } from './index';
+import { autoMoveToken, canMove, createGame, moveToken, rollDice, startGame, removePlayer } from './index';
 
 const players = [
   { id: 'a', name: 'You', color: 'coral' as const, ready: true },
@@ -7,6 +7,30 @@ const players = [
 ];
 
 describe('ludo engine', () => {
+  it('awards the remaining player the match when their opponent leaves', () => {
+    const next = removePlayer(startGame(createGame(players)), 'b');
+    expect(next.phase).toBe('finished');
+    expect(next.winner).toBe('a');
+    expect(next.players.map(player => player.id)).toEqual(['a']);
+    expect(next.tokens).toHaveLength(4);
+    expect(next.tokens.every(token => token.color === 'coral')).toBe(true);
+  });
+  it('continues a multiplayer match in turn order after the current player leaves', () => {
+    const all = [...players, { id: 'c', name: 'Sam', color: 'mint' as const, ready: true }];
+    const next = removePlayer(rollDice(startGame(createGame(all)), () => 0.99), 'a');
+    expect(next.phase).toBe('rolling');
+    expect(next.currentPlayer).toBe('b');
+    expect(next.dice).toBeNull();
+    expect(next.tokens).toHaveLength(8);
+  });
+  it('preserves a remaining player’s pending dice and ends when only one unranked player remains', () => {
+    const all = [...players, { id: 'c', name: 'Sam', color: 'mint' as const, ready: true }];
+    const pending = rollDice(startGame(createGame(all)), () => 0.99);
+    expect(removePlayer(pending, 'c').dice).toBe(6);
+    const next = removePlayer({ ...pending, finishOrder: ['b'] }, 'c');
+    expect(next.phase).toBe('finished');
+    expect(next.finishOrder).toEqual(['b', 'a']);
+  });
   it('auto-selects only a single legal token on rolls 1–5, never on six', () => {
     const state = startGame(createGame(players));
     state.tokens[0].position = 10;
@@ -14,7 +38,7 @@ describe('ludo engine', () => {
     expect(autoMoveToken(rollDice(state, () => 5/6))).toBeUndefined();
     state.tokens[1].position = 12;
     expect(autoMoveToken(rollDice(state, () => 2/6))).toBeUndefined();
-    state.tokens[1].position = 57;
+	state.tokens[1].position = 58;
     expect(autoMoveToken(rollDice(state, () => 3/6))?.id).toBe('a-0');
     expect(autoMoveToken(createGame(players))).toBeUndefined();
   });
@@ -68,12 +92,12 @@ describe('ludo engine', () => {
     state.tokens = state.tokens.map((t) => t.id === 'a-0' ? { ...t, position: 13 } : t.id === 'b-0' ? { ...t, position: 1 } : t);
     expect(moveToken(state, 'a-0').tokens.find((t) => t.id === 'b-0')?.position).toBe(1);
   });
-  it('requires exact home entry and detects all four finished tokens', () => {
+	it('finishes a token on the center endpoint and detects all four finished tokens', () => {
     const state = startGame(createGame(players));
     state.phase = 'moving'; state.dice = 2;
     state.tokens = state.tokens.map((t) => t.color === 'coral' ? { ...t, position: t.id === 'a-0' ? 57 : 58 } : t);
-    expect(moveToken(state, 'a-0')).toBe(state);
-    const next = moveToken({ ...state, dice: 1 }, 'a-0');
+		const next = moveToken(state, 'a-0');
+		expect(next.tokens.find((token) => token.id === 'a-0')?.position).toBe(58);
     expect(next.winner).toBe('a');
     expect(next.phase).toBe('finished');
   });

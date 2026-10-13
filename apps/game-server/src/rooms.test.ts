@@ -9,7 +9,7 @@ let server: ReturnType<typeof spawn>;
 const sockets: WebSocket[] = [];
 beforeAll(async () => {
   server = spawn(process.execPath, ['--import', 'tsx', 'apps/game-server/src/index.ts'], {
-    env: { ...process.env, PORT: String(port), SUPABASE_SERVICE_ROLE_KEY: '' },
+    env: { ...process.env, PORT: String(port), SUPABASE_SERVICE_ROLE_KEY: '', RECONNECT_GRACE_MS: '1000' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   await new Promise<void>((resolve, reject) => {
@@ -19,6 +19,27 @@ beforeAll(async () => {
   });
 });
 afterAll(() => { sockets.forEach((s) => s.close()); server?.kill(); });
+it('broadcasts a win and removes tokens when the opponent disconnects', async () => {
+  const host = await client();
+  const guest = await client();
+  const created = receive(host, 'ROOM_CREATED');
+  host.send(JSON.stringify({ type: 'CREATE_ROOM', name: 'Host' }));
+  const { roomCode } = await created;
+  const joined = receive(guest, 'STATE');
+  guest.send(JSON.stringify({ type: 'JOIN_ROOM', code: roomCode, name: 'Guest' }));
+  await joined;
+  const started = receive(host, 'STATE');
+  host.send(JSON.stringify({ type: 'START_GAME' }));
+  await started;
+  const departed = receive(host, 'STATE');
+  guest.close();
+  const snapshot = await departed;
+  expect(snapshot.state.phase).toBe('finished');
+  expect(snapshot.state.winner).toBe(snapshot.state.players[0].id);
+  expect(snapshot.state.players).toHaveLength(1);
+  expect(snapshot.state.tokens).toHaveLength(4);
+  expect(snapshot.turnDeadline).toBe(0);
+});
 async function client() {
   const socket = new WebSocket(`ws://localhost:${port}`);
   sockets.push(socket);
@@ -35,6 +56,44 @@ function receive(socket: WebSocket, type: string) {
     socket.on('message', listener);
   });
 }
+it('resumes the same player and match, then accepts chat and heartbeat without restarting', async () => {
+  const host = await client();
+  const guest = new WebSocket(`ws://localhost:${port}`);
+  sockets.push(guest);
+  const connected = receive(guest, 'CONNECTED');
+  await once(guest, 'open');
+  const identity = await connected;
+  const created = receive(host, 'ROOM_CREATED');
+  host.send(JSON.stringify({ type: 'CREATE_ROOM', name: 'Host' }));
+  const { roomCode } = await created;
+  const joined = receive(guest, 'STATE');
+  guest.send(JSON.stringify({ type: 'JOIN_ROOM', code: roomCode, name: 'Guest' }));
+  await joined;
+  const starting = receive(guest, 'STATE');
+  host.send(JSON.stringify({ type: 'START_GAME' }));
+  const before = await starting;
+  guest.terminate();
+  const resumed = new WebSocket(`ws://localhost:${port}/?session=${identity.sessionToken}`);
+  sockets.push(resumed);
+  const reconnected = receive(resumed, 'CONNECTED');
+  const snapshot = receive(resumed, 'STATE');
+  await once(resumed, 'open');
+  expect((await reconnected).playerId).toBe(identity.playerId);
+  const after = await snapshot;
+  expect(after.recovered).toBe(true);
+  expect(after.state).toEqual(before.state);
+  expect(after.turnDeadline).toBe(before.turnDeadline);
+  const pong = receive(resumed, 'PONG');
+  resumed.send(JSON.stringify({ type: 'PING' }));
+  expect((await pong).serverTime).toBeGreaterThan(0);
+  const chat = receive(host, 'CHAT');
+  resumed.send(JSON.stringify({ type: 'CHAT', text: 'Back online' }));
+  expect((await chat).playerId).toBe(identity.playerId);
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  const synced = receive(resumed, 'STATE');
+  resumed.send(JSON.stringify({ type: 'SYNC_STATE' }));
+  expect((await synced).state.players).toHaveLength(2);
+});
 it('rejects unknown codes and joins an existing room without creating another', async () => {
   const host = await client();
   const guest = await client();
