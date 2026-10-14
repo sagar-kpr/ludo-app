@@ -39,4 +39,4 @@ static func legal(token: Dictionary, dice: int) -> bool:
 	# selectable during a stale snapshot/animation handoff.
 	if position >= 58:
 		return false
-	return dice > 0 and (dice == 6 if position == 0 else position + dice <= 58)
+	return dice > 0 and (dice == 6 if position == 0 else true)

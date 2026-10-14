@@ -9,7 +9,8 @@ const Design = preload("res://scripts/design.gd")
 const Dice = preload("res://scripts/dice.gd")
 const Avatar = preload("res://scripts/avatar.gd")
 const ProfileAction = preload("res://scripts/profile_action.gd")
-var panel: PanelContainer
+const ProfileFrame = preload("res://scripts/profile_frame.gd")
+var panel
 var actions: HBoxContainer
 var chat
 var camera_button
@@ -26,6 +27,16 @@ var turn_duration_ms := 60000
 var turn_active := false
 var turn_own := false
 var clock_accumulator := 0.0
+var touch_tween: Tween
+
+func animate_dice_touch(pressed: bool) -> void:
+	if touch_tween:
+		touch_tween.kill()
+	if dice.reduced_motion:
+		roll.scale = Vector2.ONE
+		return
+	touch_tween = create_tween()
+	touch_tween.tween_property(roll,"scale",Vector2.ONE*0.95 if pressed else Vector2.ONE,0.09 if pressed else 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 func set_clock(deadline: int, duration: int, active: bool, own: bool) -> void:
 	turn_deadline_ticks = deadline
@@ -43,21 +54,19 @@ func _process(delta: float) -> void:
 func update_clock() -> void:
 	if not avatar:
 		return
-	var previous_fraction: float = avatar.timer_fraction
 	avatar.timer_fraction = -1
+	panel.timer_fraction = -1
 	if turn_active and turn_deadline_ticks > 0:
 		var remaining := maxi(0,turn_deadline_ticks-Time.get_ticks_msec())
-		avatar.timer_fraction = clampf(float(remaining)/turn_duration_ms,0,1)
+		panel.timer_fraction = clampf(float(remaining)/turn_duration_ms,0,1)
 		var seconds := int(ceil(remaining/1000.0))
 		status_label.text = "%d:%02d" % [seconds/60,seconds%60]
-	if previous_fraction != avatar.timer_fraction:
-		avatar.queue_redraw()
 
 func _ready() -> void:
-	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	custom_minimum_size = Vector2(0,148)
-	add_theme_constant_override("separation",5)
-	panel = PanelContainer.new()
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	custom_minimum_size = Vector2(180,112)
+	add_theme_constant_override("separation",2)
+	panel = ProfileFrame.new()
 	add_child(panel)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation",2)
@@ -75,17 +84,14 @@ func _ready() -> void:
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(name_label)
 	var row := HBoxContainer.new()
+	row.custom_minimum_size.y = 72
 	row.add_theme_constant_override("separation", 8)
 	column.add_child(row)
 	avatar = Avatar.new()
 	row.add_child(avatar)
-	avatar.custom_minimum_size = Vector2(80,80)
+	avatar.custom_minimum_size = Vector2(64,64)
 	avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
-	# The expanding spacer replaces the gap between avatar and dice.
-	row.add_theme_constant_override("separation",4)
+	row.add_theme_constant_override("separation",0)
 	status_label = Label.new()
 	status_label.custom_minimum_size.x = 50
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -118,7 +124,16 @@ func _ready() -> void:
 	roll.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	roll.tooltip_text = "Roll your dice"
 	roll.pressed.connect(func(): roll_pressed.emit())
-	row.add_child(roll)
+	roll.resized.connect(func(): roll.pivot_offset = roll.size*0.5)
+	roll.button_down.connect(func(): animate_dice_touch(true))
+	roll.button_up.connect(func(): animate_dice_touch(false))
+	# Preserve the dice space even when another player's dice is visible.
+	var dice_slot := Control.new()
+	dice_slot.custom_minimum_size = Vector2(72,72)
+	dice_slot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(dice_slot)
+	dice_slot.add_child(roll)
+	roll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dice = Dice.new()
 	roll.add_child(dice)
 	dice.custom_minimum_size = Vector2(72,72)
@@ -142,20 +157,19 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	name_label.text = str(player.get("name","Open seat"))
 	var accent: Color = Design.COLORS.get(player.get("color",""),Color("789484"))
 	avatar.configure(accent,str(player.get("name","")).hash(),not player.is_empty())
-	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
-	status_label.add_theme_color_override("font_color",Color("0064e9") if active else Color("b7cee8") if player.is_empty() else Design.MUTED)
-	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
-	var style := Design.game_surface(Color("4783c2")) if player.is_empty() else Design.surface(Color("f5f6fc"),14,accent)
-	style.set_border_width_all(2 if not player.is_empty() else 1)
-	if active:
-		style.shadow_color = Color(accent.r,accent.g,accent.b,0.55)
-		style.shadow_size = 8
-		style.shadow_offset = Vector2.ZERO
-	style.content_margin_left = 8
-	style.content_margin_right = 8
-	style.content_margin_top = 7
-	style.content_margin_bottom = 7
+	panel.timer_color = accent
+	var style := Design.surface(Color("14263f"),16)
+	style.set_border_width_all(0)
+	style.shadow_color = Color(0.015,0.025,0.06,0.35)
+	style.shadow_size = 4
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 9
+	style.content_margin_bottom = 9
 	panel.add_theme_stylebox_override("panel",style)
+	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
+	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))
+	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
 	roll.visible = active
 	invite.visible = player.is_empty()
 	chat.visible = own and not player.is_empty()
@@ -164,5 +178,5 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	gift.disabled = player_id.is_empty() or own
 	roll.disabled = not can_roll
 	if not player.is_empty():
-		roll.add_theme_stylebox_override("normal", Design.surface(Color.WHITE,10,accent))
-		roll.add_theme_stylebox_override("disabled", Design.surface(Color.WHITE,10,Design.DIVIDER))
+		for state in ["normal", "disabled", "hover", "pressed"]:
+			roll.add_theme_stylebox_override(state, StyleBoxEmpty.new())

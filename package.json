@@ -20,7 +20,7 @@
     "build": "tsc -b && vite build",
     "build:web": "node scripts/build-web.mjs",
     "preview:web": "npx serve apps/mobile/dist",
-    "deploy:web": "npm run build:web && npx firebase-tools deploy --only hosting",
+    "deploy:web": "npm run godot:build:web && npx firebase-tools deploy --only hosting --config firebase.godot.json",
     "server": "tsx watch apps/game-server/src/index.ts",
     "server:start": "tsx apps/game-server/src/index.ts",
     "android:sync": "npm run build && npx cap sync android",

@@ -48,9 +48,11 @@ func configure(color: Color, seed_value: int, joined: bool) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO,size),accent.darkened(0.48))
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("162c46").lerp(accent,0.20)
+	background.set_corner_radius_all(12)
+	draw_style_box(background,Rect2(Vector2.ZERO,size))
 	if portrait != null and portrait.texture != null:
-		_draw_frame()
 		return
 	var scale_factor := minf(size.x,size.y)/48.0
 	var offset := Vector2.ZERO
@@ -78,11 +80,15 @@ func _draw() -> void:
 		draw_circle(Vector2(4,-3),1.3,Color("282433"))
 		draw_arc(Vector2(0,0),4,0.25,PI-0.25,10,Color("a5584d"),1.2,true)
 	draw_set_transform(Vector2.ZERO)
-	_draw_frame()
 
 func _draw_frame() -> void:
 	var bounds := Rect2(Vector2(1.5,1.5),size-Vector2(3,3))
-	draw_rect(bounds,accent.lightened(0.45),false,2.0)
+	var frame := StyleBoxFlat.new()
+	frame.bg_color = Color.TRANSPARENT
+	frame.border_color = accent.lightened(0.45)
+	frame.set_border_width_all(2)
+	frame.set_corner_radius_all(12)
+	draw_style_box(frame,bounds)
 	if timer_fraction >= 0:
 		var start := Vector2(size.x*0.5,bounds.position.y)
 		var points := PackedVector2Array([start,Vector2(bounds.end.x,bounds.position.y),bounds.end,Vector2(bounds.position.x,bounds.end.y),bounds.position,start])

@@ -15,6 +15,7 @@ var network
 var board
 var content: VBoxContainer
 var home: VBoxContainer
+var home_card: VBoxContainer
 var lobby: VBoxContainer
 var game_view: VBoxContainer
 var status: Label
@@ -57,10 +58,80 @@ var sticker_picker: PopupPanel
 var sticker_target := ""
 var sticker_layer: Control
 var sticker_title: Label
+var web_form_ready := false
+var web_form_elapsed := 0.0
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	web_form_elapsed += delta
+	if OS.has_feature("web") and web_form_elapsed >= 0.1 and is_instance_valid(name_input):
+		web_form_elapsed = 0
+		sync_web_form()
 	if board and board.enabled and turn_deadline_ticks > 0 and Time.get_ticks_msec() >= turn_deadline_ticks:
 		refresh_controls()
+
+func sync_web_form() -> void:
+	if not OS.has_feature("web"):
+		return
+	if not web_form_ready:
+		JavaScriptBridge.eval("""
+		window.__rallyNativeInputs = (() => {
+			const fields = new Map();
+			return (data) => {
+				const canvas = document.querySelector('#canvas');
+				if (!canvas) return '{}';
+				const bounds = canvas.getBoundingClientRect();
+				const sx = bounds.width / data.width, sy = bounds.height / data.height;
+				const values = {};
+				for (const field of data.fields) {
+					let input = fields.get(field.id);
+					if (!input) {
+						input = document.createElement('input');
+						input.id = field.id; input.type = 'text'; input.value = field.value;
+						input.placeholder = field.placeholder; input.maxLength = field.max;
+						input.setAttribute('aria-label', field.label);
+						input.autocomplete = field.id === 'rally-name' ? 'nickname' : 'off';
+						input.setAttribute('autocapitalize', field.id === 'rally-code' ? 'characters' : 'words');
+						input.setAttribute('autocorrect', 'off'); input.spellcheck = false;
+						input.setAttribute('enterkeyhint', field.id === 'rally-name' ? 'next' : 'done');
+						input.style.cssText = 'position:fixed;z-index:20;box-sizing:border-box;background:#1b2038;color:#f5f6ff;border:1px solid #343851;border-radius:14px;padding:0 14px;font:16px Arial,sans-serif;outline:none;box-shadow:0 3px 8px rgba(0,0,0,.25);';
+						input.addEventListener('focus', () => input.style.borderColor = '#3da8dc');
+						input.addEventListener('blur', () => input.style.borderColor = '#343851');
+						input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); const next = fields.get('rally-code'); if (field.id === 'rally-name' && next) next.focus(); else input.blur(); } });
+						document.body.appendChild(input); fields.set(field.id,input);
+					}
+					if (input.engineValue !== undefined && field.value !== input.engineValue && document.activeElement !== input) input.value = field.value;
+					input.engineValue = field.value;
+					input.hidden = !data.visible;
+					if (input.hidden && document.activeElement === input) input.blur();
+					input.style.left = (bounds.left+field.rect[0]*sx)+'px';
+					input.style.top = (bounds.top+field.rect[1]*sy)+'px';
+					input.style.width = (field.rect[2]*sx)+'px';
+					input.style.height = (field.rect[3]*sy)+'px';
+					const top = Math.max(0,data.clip[1]-field.rect[1])*sy;
+					const bottom = Math.max(0,field.rect[1]+field.rect[3]-data.clip[1]-data.clip[3])*sy;
+					input.style.clipPath = 'inset('+top+'px 0 '+bottom+'px 0 round 14px)';
+					values[field.id] = input.value;
+				}
+				values.focused = document.activeElement?.id || '';
+				return JSON.stringify(values);
+			};
+		})();
+		""",true)
+		web_form_ready = true
+	var fields: Array = []
+	for entry in [[name_input,"rally-name","Your player name",18],[join_input,"rally-code","Friend’s room code",9]]:
+		var input: LineEdit = entry[0]
+		var rect := input.get_global_rect()
+		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
+	var scroll := content.get_node("SetupScroll") as ScrollContainer
+	var clip := scroll.get_global_rect()
+	var data := {"fields":fields,"visible":home.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
+	var values: Variant = JSON.parse_string(str(JavaScriptBridge.eval("window.__rallyNativeInputs("+JSON.stringify(data)+")",true)))
+	if values is Dictionary:
+		name_input.text = str(values.get("rally-name",name_input.text))
+		join_input.text = str(values.get("rally-code",join_input.text))
+		if home.is_visible_in_tree() and values.get("focused","") in ["rally-name","rally-code"]:
+			scroll.ensure_control_visible(name_input if values.focused == "rally-name" else join_input)
 
 func _ready() -> void:
 	theme = Design.make_theme()
@@ -92,6 +163,8 @@ func _ready() -> void:
 		connection_detail = detail
 		if not online:
 			pending = false
+			if not room_code.is_empty():
+				connection_detail = "Connection lost · reconnecting…"
 		refresh_controls()
 	)
 	network.connect_server(endpoint)
@@ -115,15 +188,16 @@ func _safe_area() -> void:
 	margin.add_theme_constant_override("margin_bottom", inset_bottom)
 	margin.add_theme_constant_override("margin_left",4)
 	margin.add_theme_constant_override("margin_right",4)
-	content.custom_minimum_size.x = minf(760, get_viewport_rect().size.x - 8)
+	var available := get_viewport_rect().size
+	# Keep the profiles aligned with the square table on wide screens.
+	content.custom_minimum_size.x = minf(available.x - 8.0, maxf(400.0, available.y - 250.0)) if game_view.visible else minf(600.0, available.x - 24.0)
+	if is_instance_valid(home_card):
+		home_card.custom_minimum_size.y = maxf(420.0, available.y * 0.60)
 	if is_instance_valid(board):
-		# Size using the actual card rows now that the dice is larger.
-		var card_rows: float = game_view.get_child(0).get_combined_minimum_size().y + game_view.get_child(2).get_combined_minimum_size().y
-		var panels: float = card_rows+8
-		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + panels + inset_top + inset_bottom + 12
-		# Match the near-overhead camera's full board/token envelope. A taller
-		# empty viewport used to add blank space above the board instead of size.
-		board.custom_minimum_size.y = minf(content.custom_minimum_size.x*1.08,maxf(180,get_viewport_rect().size.y-chrome))
+		# Keep profiles beside the visible board edges, with no blank viewport bands.
+		var rows: float = game_view.get_child(0).get_combined_minimum_size().y + game_view.get_child(2).get_combined_minimum_size().y
+		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + rows + inset_top + inset_bottom + 24
+		board.custom_minimum_size.y = minf(content.custom_minimum_size.x * 1.06, maxf(80.0, available.y - chrome))
 
 func label(text: String, font_size: int = 15, color: Color = Design.INK) -> Label:
 	var item := Label.new()
@@ -156,8 +230,20 @@ func button(text: String, action: Callable) -> Button:
 	)
 	return item
 
+func secondary_button(text: String, action: Callable) -> Button:
+	var item := button(text, action)
+	item.add_theme_color_override("font_color", Color.WHITE)
+	item.add_theme_color_override("font_hover_color", Color.WHITE)
+	item.add_theme_color_override("font_pressed_color", Color.WHITE)
+	item.add_theme_stylebox_override("normal", Design.surface(Color("1b2038"), 14, Design.DIVIDER))
+	item.add_theme_stylebox_override("hover", Design.surface(Color("1f466b"), 14, Design.GOLD))
+	item.add_theme_stylebox_override("pressed", Design.surface(Color("162e4b"), 14, Design.GOLD))
+	item.add_theme_stylebox_override("disabled", Design.surface(Color("15192c"), 14, Design.DIVIDER))
+	return item
+
 func panel(parent: Node) -> VBoxContainer:
 	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(card)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 12)
@@ -172,7 +258,7 @@ func build_ui() -> void:
 	add_child(background)
 	game_background = GameBackground.new()
 	game_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	game_background.hide()
+	game_background.show()
 	add_child(game_background)
 	var safe := MarginContainer.new()
 	safe.name = "SafeArea"
@@ -182,6 +268,7 @@ func build_ui() -> void:
 	add_child(safe)
 	var center := HBoxContainer.new()
 	center.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	safe.add_child(center)
 	content = VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -189,7 +276,7 @@ func build_ui() -> void:
 	center.add_child(content)
 	var header := HBoxContainer.new()
 	content.add_child(header)
-	var brand := label("Rally Ludo", 14, Design.INK)
+	var brand := label("✦  RALLY LUDO", 16, Design.INK)
 	brand_label = brand
 	brand.autowrap_mode = TextServer.AUTOWRAP_OFF
 	header.add_child(brand)
@@ -202,6 +289,7 @@ func build_ui() -> void:
 	# Only home/lobby scroll. The board and player cards stay fixed during play.
 	var scroll := ScrollContainer.new()
 	scroll.name = "SetupScroll"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(scroll)
@@ -212,53 +300,66 @@ func build_ui() -> void:
 	home = VBoxContainer.new()
 	home.add_theme_constant_override("separation", 18)
 	setup.add_child(home)
-	home.add_child(label("Play with friends", 32, Design.INK))
-	home.add_child(label("Create a room or join with a code. No account needed.", 16, Design.MUTED))
-	var home_card := panel(home)
+	home.add_child(label("Roll into the moment.", 32, Design.INK))
+	home.add_child(label("Create a room or join your friends with a code.", 16, Design.MUTED))
+	home_card = panel(home)
+	home_card.alignment = BoxContainer.ALIGNMENT_CENTER
+	home_card.add_theme_constant_override("separation", 22)
 	home_card.add_child(label("Your player name", 14, Design.MUTED))
 	name_input = LineEdit.new()
 	name_input.placeholder_text = "Guest"
 	name_input.max_length = 18
 	name_input.text = str(config.get_value("player", "name", ""))
-	name_input.custom_minimum_size.y = 48
+	name_input.custom_minimum_size.y = 60
+	name_input.focus_mode = Control.FOCUS_ALL
+	name_input.mouse_filter = Control.MOUSE_FILTER_STOP
+	name_input.virtual_keyboard_enabled = true
+	name_input.focus_entered.connect(func(): scroll.ensure_control_visible(name_input))
 	home_card.add_child(name_input)
 	create_button = button("Create a private room", func(): request_room(false))
+	create_button.custom_minimum_size.y = 60
 	home_card.add_child(create_button)
 	join_input = LineEdit.new()
 	join_input.placeholder_text = "Friend’s room code"
 	join_input.max_length = 9
-	join_input.custom_minimum_size.y = 48
+	join_input.custom_minimum_size.y = 60
+	join_input.focus_mode = Control.FOCUS_ALL
+	join_input.mouse_filter = Control.MOUSE_FILTER_STOP
+	join_input.virtual_keyboard_enabled = true
+	join_input.focus_entered.connect(func(): scroll.ensure_control_visible(join_input))
 	home_card.add_child(join_input)
-	join_button = button("Join with code", func(): request_room(true))
+	join_button = secondary_button("Join with code", func(): request_room(true))
+	join_button.custom_minimum_size.y = 60
 	home_card.add_child(join_button)
 	home.add_child(label("Guest friendly  ·  Android + web  ·  2–4 players", 12, Design.MUTED))
 	lobby = VBoxContainer.new()
 	lobby.add_theme_constant_override("separation", 16)
 	lobby.hide()
 	setup.add_child(lobby)
-	lobby.add_child(label("Your room", 28, Design.INK))
+	lobby.add_child(label("Your table is ready", 28, Design.INK))
 	var lobby_card := panel(lobby)
-	lobby_card.add_child(label("PRIVATE ROOM", 12, Design.MUTED))
+	lobby_card.add_child(label("PRIVATE ROOM  ·  INVITE YOUR FRIENDS", 12, Design.MUTED))
 	room_label = label("", 32, Design.FOREST)
 	lobby_card.add_child(room_label)
-	lobby_card.add_child(button("Copy room code", func():
+	lobby_card.add_child(secondary_button("Copy room code", func():
 		DisplayServer.clipboard_set(room_code)
 		notice.text = "Room code copied. Send it to your friends."
 	))
-	lobby_players = label("", 17)
+	lobby_players = label("", 17, Design.INK)
 	lobby_card.add_child(lobby_players)
 	start_button = button("Start game", func(): send({"type":"START_GAME"}))
 	lobby.add_child(start_button)
-	lobby.add_child(label("The host can start with 2–4 friends. Everyone uses the same room code.", 14, Design.MUTED))
+	lobby.add_child(label("The host can start when at least 2 players have joined.\nEveryone uses the same room code.", 14, Design.MUTED))
 	game_view = VBoxContainer.new()
 	game_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	game_view.add_theme_constant_override("separation", 4)
-	game_view.alignment = BoxContainer.ALIGNMENT_BEGIN
+	game_view.alignment = BoxContainer.ALIGNMENT_CENTER
 	game_view.hide()
 	content.add_child(game_view)
 	cards.resize(4)
 	for pair in range(2):
 		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_BEGIN if pair == 0 else BoxContainer.ALIGNMENT_END
 		row.add_theme_constant_override("separation", 8)
 		game_view.add_child(row)
 		for slot in range(2):
@@ -278,6 +379,10 @@ func build_ui() -> void:
 			board.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			board.token_pressed.connect(func(id: String): send({"type":"MOVE_TOKEN", "tokenId":id}))
 	notice = label("", 12, Design.MUTED)
+	# Turn messages must not grow/shrink the available board area.
+	notice.custom_minimum_size.y = 34
+	notice.max_lines_visible = 2
+	notice.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	content.add_child(notice)
 	build_dialogs()
 	chat_bubbles = ChatBubbles.new()
@@ -501,6 +606,7 @@ func show_sticker(event: Dictionary) -> void:
 		notice.text = "Sticker delivered: " + effect.kind.to_lower()
 
 func request_room(join: bool) -> void:
+	sync_web_form()
 	var player_name := name_input.text.strip_edges()
 	if player_name.is_empty():
 		player_name = "Guest"
@@ -530,6 +636,11 @@ func send_chat() -> void:
 
 func _receive(event: Dictionary) -> void:
 	if str(event.get("type","")) == "STATE":
+		if event.get("recovered",false):
+			pending = false
+			presenting = false
+			awaiting_move_state = false
+			events.clear()
 		var remaining := maxi(0,int(event.get("turnDeadline",0))-int(event.get("serverTime",0)))
 		event["deadlineTicks"] = Time.get_ticks_msec()+remaining if remaining > 0 else 0
 	# Social messages bypass dice/move animation waits, but keep server receipt order.
@@ -554,6 +665,17 @@ func drain_events() -> void:
 func present_event(event: Dictionary) -> void:
 	match str(event.type):
 		"CONNECTED":
+			if not room_code.is_empty() and not event.get("resumed",false):
+				room_code = ""
+				game = {}
+				latest_version = -1
+				content.get_node("SetupScroll").show()
+				home.show()
+				lobby.hide()
+				game_view.hide()
+				notice.text = "This room is no longer available. Please create or join a room."
+			elif event.get("resumed",false):
+				notice.text = "Connection restored. Resuming your game…"
 			self_id = str(event.playerId)
 		"ERROR":
 			pending = false
@@ -565,6 +687,8 @@ func present_event(event: Dictionary) -> void:
 			home.hide()
 			lobby.show()
 		"STATE":
+			room_code = str(event.get("roomCode",room_code))
+			room_label.text = room_code
 			var snapshot: Dictionary = event.state
 			if int(snapshot.get("version",0)) < latest_version:
 				return
@@ -631,7 +755,8 @@ func show_state() -> void:
 	lobby.visible = is_lobby
 	content.get_node("SetupScroll").visible = is_lobby
 	game_view.visible = not is_lobby
-	game_background.visible = not is_lobby
+	_safe_area()
+	game_background.visible = true
 	brand_label.add_theme_color_override("font_color",Color("f3f7ff") if not is_lobby else Design.INK)
 	notice.add_theme_color_override("font_color",Color("c2d6ef") if not is_lobby else Design.MUTED)
 	var players: Array = game.get("players",[])
@@ -669,7 +794,7 @@ func refresh_controls() -> void:
 	create_button.disabled = not online or pending
 	join_button.disabled = not online or pending
 	var players: Array = game.get("players",[])
-	restart_button.disabled = not online or pending or presenting
+	restart_button.disabled = not online or pending or presenting or players.size() < 2
 	start_button.visible = not players.is_empty() and players[0].id == self_id
 	start_button.disabled = not online or pending or players.size() < 2
 	var can_act := online and not pending and not presenting and (turn_deadline_ticks == 0 or Time.get_ticks_msec() < turn_deadline_ticks)
@@ -686,6 +811,7 @@ func refresh_controls() -> void:
 		var active: bool = not player.is_empty() and player.id == game.get("currentPlayer") and game.get("phase") in ["rolling","moving"]
 		var own: bool = not player.is_empty() and player.id == self_id
 		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own)
+		cards[seat].visible = not player.is_empty()
 		cards[seat].set_clock(turn_deadline_ticks,turn_duration_ms,active and not presenting,own)
 		var rank: int = game.get("finishOrder",[]).find(player.get("id",""))
 		if rank >= 0:

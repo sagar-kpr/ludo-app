@@ -7,7 +7,7 @@ const Design = preload("res://scripts/design.gd")
 const BoardMath = preload("res://scripts/board_math.gd")
 const Pawn = preload("res://scripts/pawn.gd")
 const Geometry = preload("res://scripts/geometry.gd")
-const BOARD_COLORS = {"coral": Color("ff1010"), "sun": Color("168900"), "mint": Color("ffe200"), "violet": Color("159de8")}
+const BOARD_COLORS = Design.COLORS
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -21,6 +21,7 @@ var stack_labels: Array[Label3D] = []
 var rank_labels: Dictionary = {}
 var trails: Array[MeshInstance3D] = []
 var trail_shader: Shader
+var home_docks: Dictionary = {}
 
 func _ready() -> void:
 	stretch = true
@@ -120,7 +121,7 @@ func flat_rect(at: Vector3, dimensions: Vector2, color: Color) -> MeshInstance3D
 	world.add_child(instance)
 	return instance
 
-func disc(at: Vector3, radius: float, color: Color) -> void:
+func disc(at: Vector3, radius: float, color: Color) -> MeshInstance3D:
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = radius
 	mesh.bottom_radius = radius
@@ -132,6 +133,7 @@ func disc(at: Vector3, radius: float, color: Color) -> void:
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	instance.position = at
 	world.add_child(instance)
+	return instance
 
 func triangle(points: Array, color: Color) -> void:
 	var mesh := ImmediateMesh.new()
@@ -157,9 +159,9 @@ func star(at: Vector3, colored: bool = false) -> void:
 		var r2 := 0.19 if index % 2 == 0 else 0.40
 		var outer_a := at+Vector3(cos(a)*r1,0,sin(a)*r1)
 		var outer_b := at+Vector3(cos(b)*r2,0,sin(b)*r2)
-		var inner_a := at+Vector3(cos(a)*(r1-0.027),0,sin(a)*(r1-0.027))
-		var inner_b := at+Vector3(cos(b)*(r2-0.027),0,sin(b)*(r2-0.027))
-		var ink := Color.WHITE if colored else Color("171c22")
+		var inner_a := at+Vector3(cos(a)*(r1-0.035),0,sin(a)*(r1-0.035))
+		var inner_b := at+Vector3(cos(b)*(r2-0.035),0,sin(b)*(r2-0.035))
+		var ink := Color("65766e") if colored else Color("78827e")
 		triangle([outer_a,outer_b,inner_a],ink)
 		triangle([inner_a,outer_b,inner_b],ink)
 
@@ -177,22 +179,21 @@ func arrow(at: Vector3, direction: Vector3, color: Color) -> void:
 	stroke(at-side*0.18,tip,0.045,color)
 
 func make_board() -> void:
-	flat_rect(Vector3(0,0.18,0),Vector2(15.08,15.08),Color("171c22"))
-	flat_rect(Vector3(0,0.19,0),Vector2(15.0,15.0),Color("171c22"))
+	flat_rect(Vector3(0,0.18,0),Vector2(15.08,15.08),Color("687a7b"))
+	flat_rect(Vector3(0,0.19,0),Vector2(15.0,15.0),Color("9aa6a2"))
 	var corners := [Vector2i(0,0), Vector2i(0,9), Vector2i(9,9), Vector2i(9,0)]
 	for seat in range(4):
 		var color: Color = BOARD_COLORS[BoardMath.COLORS[seat]]
 		var corner: Vector2i = corners[seat]
 		var center := Vector3(corner.y - 4.5, 0, corner.x - 4.5)
-		flat_rect(center+Vector3(0,0.20,0),Vector2(5.98,5.98),Color("125b83") if seat == 3 else color)
+		flat_rect(center+Vector3(0,0.20,0),Vector2(5.98,5.98),Color("d5bc17") if seat == 2 else color)
 		# A printed outline and white inset, not a recessed tray or raised frame.
-		flat_rect(center+Vector3(0,0.202,0),Vector2(4.06,4.06),Color("171c22")).name = "HomeRim%d" % seat
+		flat_rect(center+Vector3(0,0.202,0),Vector2(4.06,4.06),color.darkened(0.20)).name = "HomeRim%d" % seat
 		flat_rect(center+Vector3(0,0.204,0),Vector2(4.0,4.0),Color.WHITE).name = "HomeFloor%d" % seat
 		for index in range(4):
 			var dock := BoardMath.world(BoardMath.COLORS[seat], 0, index)
 			dock.y = 0.206
-			disc(dock,0.47,Color("171c22"))
-			disc(dock+Vector3(0,0.002,0),0.44,color)
+			home_docks[str(BoardMath.COLORS[seat])+"-"+str(index)] = [disc(dock,0.47,color.lightened(0.18)),disc(dock+Vector3(0,0.002,0),0.44,color)]
 	for row in range(15):
 		for col in range(15):
 			if (row < 6 or row > 8) and (col < 6 or col > 8):
@@ -223,13 +224,24 @@ func make_board() -> void:
 	triangle([Vector3(-1.5,0.20,1.5),Vector3(1.5,0.20,1.5),middle],BOARD_COLORS.violet)
 	for x in [-1.5,1.5]:
 		for z in [-1.5,1.5]:
-			stroke(Vector3(0,0.202,0),Vector3(x,0.202,z),0.025,Color("171c22"))
+			stroke(Vector3(0,0.202,0),Vector3(x,0.202,z),0.022,Color("78827e"))
 	arrow(Vector3(-7,0.202,0),Vector3.LEFT,BOARD_COLORS.coral)
 	arrow(Vector3(0,0.202,-7),Vector3.FORWARD,BOARD_COLORS.sun)
 	arrow(Vector3(7,0.202,0),Vector3.RIGHT,BOARD_COLORS.mint)
 	arrow(Vector3(0,0.202,7),Vector3.BACK,BOARD_COLORS.violet)
 
 func apply_state(state: Dictionary, self_id: String, highlight_color: String = "") -> void:
+	for dock in home_docks.values():
+		for mesh in dock:
+			mesh.visible = true
+	var present: Dictionary = {}
+	for token in state.get("tokens", []):
+		present[str(token.id)] = true
+	for id in pawns.keys():
+		if not present.has(id):
+			pawns[id].queue_free()
+			pawns.erase(id)
+			tokens.erase(id)
 	var active_color := ""
 	for player in state.get("players", []):
 		if player.id == state.get("currentPlayer"):
@@ -250,7 +262,7 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 		if int(token.position) == 58:
 			pawn.position = BoardMath.world(str(token.color),0,index)
 		pawn.legal_move = int(token.position) < 58 and state.get("currentPlayer") == self_id and state.get("phase") == "moving" and token.color == active_color and BoardMath.legal(token, int(state.get("dice", 0)))
-		pawn.highlight = token.color == highlight_color
+		pawn.highlight = int(token.position) < 58 and state.get("phase") in ["rolling","moving"] and token.color == (highlight_color if not highlight_color.is_empty() else active_color)
 		tokens[id] = token.duplicate()
 	layout_stacks()
 	show_ranks(state)
@@ -358,17 +370,18 @@ func leave_trail(at: Vector3, color: Color) -> void:
 	mark.mesh = mesh
 	if not trail_shader:
 		trail_shader = Shader.new()
-		trail_shader.code = "shader_type spatial; render_mode unshaded,cull_disabled,depth_draw_never; uniform vec4 tint : source_color; uniform float fade = 1.0; void fragment(){float r=length((UV-vec2(0.5))*2.0); ALBEDO=tint.rgb; ALPHA=(1.0-smoothstep(0.0,1.0,r))*0.45*fade;}"
+		trail_shader.code = "shader_type spatial; render_mode unshaded,cull_disabled,depth_draw_never; uniform vec4 tint : source_color; uniform float fade = 1.0; void fragment(){float r=length((UV-vec2(0.5))*2.0); ALBEDO=tint.rgb; ALPHA=(1.0-smoothstep(0.1,1.0,r))*0.42*fade;}"
 	var finish := ShaderMaterial.new()
 	finish.shader = trail_shader
-	finish.set_shader_parameter("tint",color)
+	finish.set_shader_parameter("tint",color.lightened(0.30))
 	mark.material_override = finish
 	mark.position = at+Vector3(0,0.025,0)
 	mark.rotation.x = -PI/2
 	world.add_child(mark)
 	trails.append(mark)
 	var tween := create_tween()
-	tween.tween_method(func(value: float): finish.set_shader_parameter("fade",value),1.0,0.0,0.7)
+	tween.tween_method(func(value: float): finish.set_shader_parameter("fade",value),1.0,0.0,1.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(mark,"scale",Vector3(1.18,1.18,1.18),1.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.tween_callback(func():
 		trails.erase(mark)
 		mark.queue_free()
@@ -376,7 +389,7 @@ func leave_trail(at: Vector3, color: Color) -> void:
 
 func highlight_player(color: String) -> void:
 	for id in pawns:
-		pawns[id].highlight = tokens[id].color == color
+		pawns[id].highlight = tokens[id].color == color and int(tokens[id].position) < 58
 
 func animate_move(event: Dictionary) -> void:
 	var id := str(event.get("tokenId", ""))
@@ -387,16 +400,17 @@ func animate_move(event: Dictionary) -> void:
 	var start := int(event.get("from", token.position))
 	var finish := int(event.get("to", token.position))
 	var steps := 1 if start == 0 else finish - start
-	var duration := float(event.get("durationMs", steps*160)) / 1000.0
+	var duration := float(event.get("durationMs", steps*240)) / 1000.0
 	layout_stacks(id)
 	pawns[id].scale = Vector3.ONE
+	leave_trail(pawns[id].position,BOARD_COLORS[token.color])
 	for step in range(steps):
 		var landing := finish if start == 0 else start + step + 1
 		# Completed pawns land in their own dock instead of briefly moving to the
 		# center, where they can be hidden by the HUD during the state update.
 		var destination := BoardMath.world(str(token.color),0,index) if landing >= 58 else BoardMath.world(str(token.color),landing,index)
-		leave_trail(pawns[id].position,BOARD_COLORS[token.color])
-		await pawns[id].hop_to(destination, duration / maxf(steps, 1), reduced_motion)
+		await pawns[id].hop_to(destination, maxf(0.24,duration / maxf(steps, 1)), reduced_motion)
+		leave_trail(destination,BOARD_COLORS[token.color])
 		step_landed.emit(id)
 	for captured_id in event.get("captured", []):
 		if pawns.has(captured_id):

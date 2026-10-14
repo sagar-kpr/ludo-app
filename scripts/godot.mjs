@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,4 +42,27 @@ else if (mode === 'build:web') {
 if (extra.length) args.push('--', ...extra);
 const result = spawnSync(binary, args, { cwd: root, stdio: 'inherit' });
 if (result.error) console.error('Godot could not start. Install Godot 4.6.1 or set GODOT_BIN to its executable.');
+if (mode === 'build:web' && result.status === 0) {
+  const htmlPath = path.join(project, 'dist/index.html');
+  const html = readFileSync(htmlPath, 'utf8');
+  const branded = html
+    .replace(
+      '<img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="index.png" alt="">',
+      '<div id="status-splash" class="rally-splash"><div class="rally-splash-mark">✦</div><strong>RALLY <span>LUDO</span></strong><small>Loading your table…</small></div>',
+    )
+    .replace(
+      '</style>',
+      `
+.rally-splash { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.7rem; color: #f5f6ff; font-family: Arial, sans-serif; background: radial-gradient(circle at 50% 42%, #252943 0%, #0d1021 52%, #080b18 100%); }
+.rally-splash-mark { width: 4rem; height: 4rem; border-radius: 1.25rem; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #3da8dc, #16355c); font-size: 2.2rem; box-shadow: 0 1rem 2.5rem rgba(20, 75, 120, 0.45); animation: rally-float 2.4s ease-in-out infinite, rally-glow 2.4s ease-in-out infinite; }
+.rally-splash strong { font-size: 1.15rem; letter-spacing: 0.16rem; animation: rally-rise 0.8s ease both; }
+.rally-splash strong span { color: #ffbf4b; }
+.rally-splash small { color: #969ab7; font-size: 0.78rem; letter-spacing: 0.04rem; animation: rally-rise 0.8s 0.12s ease both; }
+@keyframes rally-float { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-0.45rem) rotate(3deg); } }
+@keyframes rally-glow { 50% { box-shadow: 0 0 2.2rem rgba(61, 168, 220, 0.42), 0 1rem 2.5rem rgba(20, 75, 120, 0.45); } }
+@keyframes rally-rise { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: translateY(0); } }
+</style>`,
+    );
+  writeFileSync(htmlPath, branded);
+}
 process.exit(result.status ?? 1);

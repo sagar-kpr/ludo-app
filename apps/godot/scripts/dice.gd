@@ -9,7 +9,6 @@ var camera: Camera3D
 var settled_value := 1
 var rolling := false
 var reduced_motion := false
-const PawnFinish = preload("res://scripts/pawn.gd")
 const FACE_ROTATIONS = {
 	1: Vector3(0,0,0), 2: Vector3(PI/2,0,0), 3: Vector3(0,0,PI/2),
 	4: Vector3(0,0,-PI/2), 5: Vector3(-PI/2,0,0), 6: Vector3(PI,0,0)
@@ -39,14 +38,12 @@ func _ready() -> void:
 	die = Node3D.new()
 	root.add_child(die)
 	var body := rounded_cube()
-	var finish_helper := PawnFinish.new()
-	var white := finish_helper.lacquer(Color.WHITE)
-	white.set_shader_parameter("base_lift",0.40)
-	finish_helper.free()
+	var white := enamel()
 	add_mesh(body, Vector3.ZERO, white, die)
 	var black := StandardMaterial3D.new()
 	black.albedo_color = Color("101a2c")
 	black.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	black.cull_mode = BaseMaterial3D.CULL_DISABLED
 	for face in range(1,7):
 		var face_root := Node3D.new()
 		face_root.rotation = -FACE_ROTATIONS[face]
@@ -80,6 +77,52 @@ func _ready() -> void:
 	light.light_energy = 1.5
 	root.add_child(light)
 	show_face(1)
+
+func enamel() -> ShaderMaterial:
+	# Dice have their own studio shading; pawn colours stay bright.
+	var shader := Shader.new()
+	shader.code = """
+	shader_type spatial;
+	render_mode unshaded;
+	varying vec3 normal_world;
+	varying vec3 position_world;
+	void vertex() {
+		normal_world = normalize(mat3(MODEL_MATRIX)*NORMAL);
+		position_world = (MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;
+	}
+	void fragment() {
+		vec3 n = normalize(normal_world);
+		vec3 v = normalize(CAMERA_POSITION_WORLD-position_world);
+		vec3 key = normalize(vec3(-0.6,1.0,0.4));
+		float light = 0.66+0.30*max(dot(n,key),0.0);
+		float shine = pow(max(dot(n,normalize(key+v)),0.0),28.0)*0.14;
+		ALBEDO = vec3(0.96,0.97,1.0)*light+vec3(shine);
+	}
+	"""
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	return material
+
+func face_outline() -> ImmediateMesh:
+	# Raised black rounded-square trim on all six numbered faces.
+	var outer := PackedVector2Array()
+	var inner := PackedVector2Array()
+	for corner in range(4):
+		var center: Vector2 = [Vector2(0.30,-0.30),Vector2(0.30,0.30),Vector2(-0.30,0.30),Vector2(-0.30,-0.30)][corner]
+		for step in range(9):
+			var angle := -PI/2+corner*PI/2+step*PI/16
+			var direction := Vector2(cos(angle),sin(angle))
+			outer.append(center+direction*0.085)
+			inner.append(center+direction*0.059)
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for index in range(outer.size()):
+		var next := (index+1)%outer.size()
+		for point in [outer[index],outer[next],inner[next],outer[index],inner[next],inner[index]]:
+			mesh.surface_set_normal(Vector3.UP)
+			mesh.surface_add_vertex(Vector3(point.x,0,point.y))
+	mesh.surface_end()
+	return mesh
 
 func rounded_cube() -> ImmediateMesh:
 	# Rounded edges are geometry, so lighting works on both native and WebGL.
@@ -121,6 +164,7 @@ func show_face(value: int) -> void:
 		camera.size = 1.75
 		die.rotation = FACE_ROTATIONS[value]
 		die.position = Vector3.ZERO
+		die.scale = Vector3.ONE
 		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 func animate_roll(value: int) -> void:
@@ -136,9 +180,11 @@ func animate_roll(value: int) -> void:
 			while contacts.next < CONTACT_TIMES.size() and progress >= CONTACT_TIMES[contacts.next]:
 				roll_contact.emit(false,1.0-progress*0.65)
 				contacts.next += 1
-			var ease := 1.0 - pow(1.0 - progress, 3)
+			var ease := progress*progress*(3.0-2.0*progress)
 			die.rotation = from.lerp(target + Vector3(TAU*2,TAU*2,TAU), ease)
-			die.position.y = sin(progress*PI) * 0.2
+			var lift := sin(progress*PI)
+			die.position.y = lift*0.20 + absf(sin(progress*PI*4.0))*lift*0.04
+			die.scale = Vector3(1.0-lift*0.025,1.0+lift*0.045,1.0-lift*0.025)
 		, 0.0, 1.0, 1.2)
 		await tween.finished
 	else:

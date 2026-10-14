@@ -5,6 +5,7 @@
     "headers": [
       {"source": "**", "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}]},
       {"source": "/index.html", "headers": [{"key": "Cache-Control", "value": "no-cache"}]},
+      {"source": "**/*.pck", "headers": [{"key": "Cache-Control", "value": "no-cache"}]},
       {"source": "**/*.wasm", "headers": [{"key": "Content-Type", "value": "application/wasm"}]}
     ]
   }

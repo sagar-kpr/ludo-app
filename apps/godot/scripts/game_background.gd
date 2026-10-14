@@ -7,16 +7,18 @@ func _ready() -> void:
 	var fill := ColorRect.new()
 	fill.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	fill.color = Color("f4f6fa")
+	fill.color = Color("080b18")
 	var shader := Shader.new()
 	shader.code = """
 	shader_type canvas_item;
 	uniform float aspect = 0.5;
 	void fragment() {
 		vec2 p = (UV-vec2(0.5))*vec2(aspect,1.0);
-		float glow = exp(-dot(p,p)*4.0);
+		p += vec2(sin(TIME*0.16)*0.018, cos(TIME*0.13)*0.014);
+		float pulse = 0.92 + sin(TIME*0.7)*0.08;
+		float glow = exp(-dot(p,p)*4.0)*pulse;
 		vec3 base = mix(vec3(0.035,0.085,0.17),vec3(0.10,0.29,0.48),glow);
-		vec2 grid = mat2(vec2(0.819,-0.574),vec2(0.574,0.819))*p*11.0;
+		vec2 grid = mat2(vec2(0.819,-0.574),vec2(0.574,0.819))*p*11.0 + vec2(TIME*0.012,-TIME*0.008);
 		vec2 cell = fract(grid)-0.5;
 		vec2 q = abs(cell)-vec2(0.31);
 		float tile = 1.0-smoothstep(0.0,0.02,length(max(q,vec2(0.0)))+min(max(q.x,q.y),0.0)-0.045);
