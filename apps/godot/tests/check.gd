@@ -115,7 +115,7 @@ func run() -> void:
 	var profile = host.cards[2].avatar
 	check(profile.clip_contents and is_equal_approx(profile.size.x,profile.size.y),"Avatar is clipped to a square frame")
 	for card in host.cards:
-		check(card.avatar.size.x >= 80 and card.avatar.size.y >= 80,"Every player has an enlarged video-ready profile square")
+		check(card.avatar.size.x >= 72 and card.avatar.size.y >= 72,"Every player has an enlarged video-ready profile square")
 	check(host.cards[0].name_label.get_global_rect().end.y <= host.cards[0].avatar.global_position.y,"Player name stays above the video square")
 	check(not host.cards[0].avatar.get_global_rect().intersects(host.cards[0].roll.get_global_rect()),"Video square and dice do not overlap")
 	var photo := GradientTexture2D.new()

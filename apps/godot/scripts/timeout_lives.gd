@@ -12,7 +12,7 @@ var remaining := TOTAL:
 		queue_redraw()
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(0,10)
+	custom_minimum_size = Vector2(0,8)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	resized.connect(queue_redraw)

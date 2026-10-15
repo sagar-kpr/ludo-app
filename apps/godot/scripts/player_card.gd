@@ -93,7 +93,7 @@ func _ready() -> void:
 	panel = ProfileFrame.new()
 	add_child(panel)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation",2)
+	column.add_theme_constant_override("separation",0)
 	panel.add_child(column)
 	# Name above the media row leaves a genuinely usable camera square rather
 	# than squeezing the portrait between the name and the large dice.
@@ -108,7 +108,7 @@ func _ready() -> void:
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(name_label)
 	var row := HBoxContainer.new()
-	row.custom_minimum_size.y = 80
+	row.custom_minimum_size.y = 72
 	row.add_theme_constant_override("separation", 12)
 	column.add_child(row)
 	var portrait_column := VBoxContainer.new()
@@ -117,7 +117,7 @@ func _ready() -> void:
 	row.add_child(portrait_column)
 	avatar = Avatar.new()
 	portrait_column.add_child(avatar)
-	avatar.custom_minimum_size = Vector2(80,80)
+	avatar.custom_minimum_size = Vector2(72,72)
 	avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	lives = TimeoutLives.new()
 	portrait_column.add_child(lives)
@@ -154,7 +154,7 @@ func _ready() -> void:
 	gift.pressed.connect(func(): gift_pressed.emit(player_id))
 	actions.add_child(gift)
 	roll = Button.new()
-	roll.custom_minimum_size = Vector2(60,60)
+	roll.custom_minimum_size = Vector2(56,56)
 	roll.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	roll.tooltip_text = "Roll your dice"
 	roll.pressed.connect(func(): roll_pressed.emit())
@@ -165,13 +165,13 @@ func _ready() -> void:
 	var dice_slot := HBoxContainer.new()
 	dice_slot.alignment = BoxContainer.ALIGNMENT_END
 	dice_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	dice_slot.custom_minimum_size = Vector2(60,80)
+	dice_slot.custom_minimum_size = Vector2(56,72)
 	dice_slot.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_child(dice_slot)
 	dice_slot.add_child(roll)
 	dice = Dice.new()
 	roll.add_child(dice)
-	dice.custom_minimum_size = Vector2(60,60)
+	dice.custom_minimum_size = Vector2(56,56)
 	dice.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	roll.hide()
 	invite = Button.new()
@@ -202,8 +202,8 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.shadow_size = 4
 	style.content_margin_left = 10
 	style.content_margin_right = 10
-	style.content_margin_top = 9
-	style.content_margin_bottom = 9
+	style.content_margin_top = 4
+	style.content_margin_bottom = 11
 	panel.add_theme_stylebox_override("panel",style)
 	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
 	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))

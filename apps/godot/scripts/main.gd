@@ -206,7 +206,7 @@ func _safe_area() -> void:
 		# Keep profiles beside the visible board edges, with no blank viewport bands.
 		var rows: float = game_view.get_child(0).get_combined_minimum_size().y + game_view.get_child(2).get_combined_minimum_size().y
 		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + rows + inset_top + inset_bottom + 24
-		board.custom_minimum_size.y = minf(content.custom_minimum_size.x * 1.06, maxf(80.0, available.y - chrome))
+		board.custom_minimum_size.y = maxf(80.0, available.y - chrome)
 
 func label(text: String, font_size: int = 15, color: Color = Design.INK) -> Label:
 	var item := Label.new()
