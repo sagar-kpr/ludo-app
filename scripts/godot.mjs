@@ -47,7 +47,9 @@ if (result.error) console.error('Godot could not start. Install Godot 4.6.1 or s
 if (mode === 'build:web' && result.status === 0) {
   const htmlPath = path.join(project, 'dist/index.html');
   const html = readFileSync(htmlPath, 'utf8');
+  const nativeInputs = readFileSync(path.join(project, 'web/native_inputs.js'), 'utf8').replace(/<\/script/gi, '<\\/script');
   const branded = html
+    .replace('const engine = new Engine(GODOT_CONFIG);', `${nativeInputs}\nconst engine = new Engine(GODOT_CONFIG);`)
     .replace(
       '<img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="index.png" alt="">',
       '<div id="status-splash" class="rally-splash"><div class="rally-splash-mark">✦</div><strong>RALLY <span>LUDO</span></strong><small>Loading your table…</small></div>',

@@ -66,12 +66,14 @@ var sticker_grid: GridContainer
 var sticker_anchor: Control
 var web_form_ready := false
 var web_form_elapsed := 0.0
+var web_focused_field := ""
+var web_viewport_revision := -1
 
 func _process(delta: float) -> void:
 	if is_instance_valid(sticker_picker) and sticker_picker.visible:
 		position_sticker_picker()
 	web_form_elapsed += delta
-	if OS.has_feature("web") and web_form_elapsed >= 0.1 and is_instance_valid(name_input):
+	if OS.has_feature("web") and is_instance_valid(name_input) and (web_form_elapsed >= 0.1 or home.is_visible_in_tree()):
 		web_form_elapsed = 0
 		sync_web_form()
 	if board and board.enabled and turn_deadline_ticks > 0 and Time.get_ticks_msec() >= turn_deadline_ticks:
@@ -81,50 +83,7 @@ func sync_web_form() -> void:
 	if not OS.has_feature("web"):
 		return
 	if not web_form_ready:
-		JavaScriptBridge.eval("""
-		window.__rallyNativeInputs = (() => {
-			const fields = new Map();
-			return (data) => {
-				const canvas = document.querySelector('#canvas');
-				if (!canvas) return '{}';
-				const bounds = canvas.getBoundingClientRect();
-				const sx = bounds.width / data.width, sy = bounds.height / data.height;
-				const values = {};
-				for (const field of data.fields) {
-					let input = fields.get(field.id);
-					if (!input) {
-						input = document.createElement('input');
-						input.id = field.id; input.type = 'text'; input.value = field.value;
-						input.placeholder = field.placeholder; input.maxLength = field.max;
-						input.setAttribute('aria-label', field.label);
-						input.autocomplete = field.id === 'rally-name' ? 'nickname' : 'off';
-						input.setAttribute('autocapitalize', field.id === 'rally-code' ? 'characters' : 'words');
-						input.setAttribute('autocorrect', 'off'); input.spellcheck = false;
-						input.setAttribute('enterkeyhint', field.id === 'rally-name' ? 'next' : 'done');
-						input.style.cssText = 'position:fixed;z-index:20;box-sizing:border-box;background:#1b2038;color:#f5f6ff;border:1px solid #343851;border-radius:14px;padding:0 14px;font:16px Arial,sans-serif;outline:none;box-shadow:0 3px 8px rgba(0,0,0,.25);';
-						input.addEventListener('focus', () => input.style.borderColor = '#3da8dc');
-						input.addEventListener('blur', () => input.style.borderColor = '#343851');
-						input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); const next = fields.get('rally-code'); if (field.id === 'rally-name' && next) next.focus(); else input.blur(); } });
-						document.body.appendChild(input); fields.set(field.id,input);
-					}
-					if (input.engineValue !== undefined && field.value !== input.engineValue && document.activeElement !== input) input.value = field.value;
-					input.engineValue = field.value;
-					input.hidden = !data.visible;
-					if (input.hidden && document.activeElement === input) input.blur();
-					input.style.left = (bounds.left+field.rect[0]*sx)+'px';
-					input.style.top = (bounds.top+field.rect[1]*sy)+'px';
-					input.style.width = (field.rect[2]*sx)+'px';
-					input.style.height = (field.rect[3]*sy)+'px';
-					const top = Math.max(0,data.clip[1]-field.rect[1])*sy;
-					const bottom = Math.max(0,field.rect[1]+field.rect[3]-data.clip[1]-data.clip[3])*sy;
-					input.style.clipPath = 'inset('+top+'px 0 '+bottom+'px 0 round 14px)';
-					values[field.id] = input.value;
-				}
-				values.focused = document.activeElement?.id || '';
-				return JSON.stringify(values);
-			};
-		})();
-		""",true)
+		JavaScriptBridge.eval(FileAccess.get_file_as_string("res://web/native_inputs.js"),true)
 		web_form_ready = true
 	var fields: Array = []
 	for entry in [[name_input,"rally-name","Your player name",18],[join_input,"rally-code","Friend’s room code",9]]:
@@ -136,10 +95,39 @@ func sync_web_form() -> void:
 	var data := {"fields":fields,"visible":home.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
 	var values: Variant = JSON.parse_string(str(JavaScriptBridge.eval("window.__rallyNativeInputs("+JSON.stringify(data)+")",true)))
 	if values is Dictionary:
+		# Keep text and controls at their normal width when a keyboard shortens
+		# the visible viewport. The setup panel scrolls instead of shrinking.
+		var css_width := maxf(1,float(values.get("viewportWidth",420)))
+		var css_height := maxf(1,float(values.get("viewportHeight",860)))
+		var reference_width := maxf(420,css_width)
+		var reference := Vector2i(roundi(reference_width),roundi(css_height*reference_width/css_width))
+		if get_window().content_scale_size != reference:
+			get_window().content_scale_size = reference
 		name_input.text = str(values.get("rally-name",name_input.text))
 		join_input.text = str(values.get("rally-code",join_input.text))
-		if home.is_visible_in_tree() and values.get("focused","") in ["rally-name","rally-code"]:
-			scroll.ensure_control_visible(name_input if values.focused == "rally-name" else join_input)
+		var focused := str(values.get("focused",""))
+		var revision := int(values.get("viewportRevision",0))
+		if focused != web_focused_field or revision != web_viewport_revision:
+			web_focused_field = focused
+			web_viewport_revision = revision
+			# Let containers settle after a keyboard resize before scrolling once.
+			if home.is_visible_in_tree() and focused in ["rally-name","rally-code"]:
+				call_deferred("reveal_web_field",focused)
+
+func reveal_web_field(id: String) -> void:
+	await get_tree().process_frame
+	if not home.is_visible_in_tree() or id != web_focused_field:
+		return
+	var scroll := content.get_node("SetupScroll") as ScrollContainer
+	scroll.ensure_control_visible(name_input if id == "rally-name" else join_input)
+
+func configure_web_field(input: LineEdit) -> void:
+	if OS.has_feature("web"):
+		# Keep the layout slot; the browser supplies its only visible input.
+		input.modulate.a = 0.0
+		input.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		input.focus_mode = Control.FOCUS_NONE
+		input.virtual_keyboard_enabled = false
 
 func _ready() -> void:
 	theme = Design.make_theme()
@@ -324,6 +312,7 @@ func build_ui() -> void:
 	name_input.mouse_filter = Control.MOUSE_FILTER_STOP
 	name_input.virtual_keyboard_enabled = true
 	name_input.focus_entered.connect(func(): scroll.ensure_control_visible(name_input))
+	configure_web_field(name_input)
 	home_card.add_child(name_input)
 	create_button = button("Create a private room", func(): request_room(false))
 	create_button.custom_minimum_size.y = 60
@@ -336,6 +325,7 @@ func build_ui() -> void:
 	join_input.mouse_filter = Control.MOUSE_FILTER_STOP
 	join_input.virtual_keyboard_enabled = true
 	join_input.focus_entered.connect(func(): scroll.ensure_control_visible(join_input))
+	configure_web_field(join_input)
 	home_card.add_child(join_input)
 	join_button = secondary_button("Join with code", func(): request_room(true))
 	join_button.custom_minimum_size.y = 60

@@ -431,3 +431,25 @@ with a one-second clock and child-only deterministic dice. It checks every life
 count, smoke departure, winner handling, home navigation, and fresh-game reset.
 The WebSocket suite also checks shared roll/move accounting and the manual-roll
 single-choice exemption. UI layout checks cover dot alignment and player colors.
+
+### Mobile browser keyboard
+
+The exported web page loads `web/native_inputs.js` before the engine. The canvas
+and native name/code inputs share one positioned container sized to the browser's
+visible viewport. Keyboard resize/scroll events update both together; policy 0
+keeps Godot's window sizing from competing with that container. The Godot layout
+reference adapts to the visible height, so controls keep their normal size and
+the setup panel scrolls rather than shrinking. The layout-only LineEdits are
+transparent and cannot open a second virtual keyboard on web; native clients
+retain their normal LineEdits. Focus and viewport changes reveal the active
+field once after layout, instead of repeatedly fighting the browser's scroll.
+
+The JavaScript is also included in the PCK as a fallback, and Firebase's root
+HTML response now uses no-cache so new bootstrap code is fetched on reload.
+The viewport model follows the [VisualViewport API](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport).
+
+Run `npm run godot:test:keyboard` for a real exported-game browser check. It
+simulates Safari's visual viewport shrinking/panning while the layout viewport
+stays tall, plus focus switching, rotation, keyboard dismissal, value preservation,
+and an actual canvas create-room tap. These are desktop browser simulations;
+physical iPhone Safari keyboard behavior still needs device confirmation.

@@ -11,6 +11,7 @@
     "godot:test": "node scripts/test-godot.mjs",
     "godot:test:leaving": "node scripts/test-godot.mjs leaving",
     "godot:test:lives": "node scripts/test-godot.mjs lives",
+    "godot:test:keyboard": "npm run godot:build:web && node scripts/test-godot-keyboard.mjs",
     "godot:test:browser": "npm run godot:build:web && node scripts/test-godot-browser.mjs",
     "godot:build:web": "node scripts/godot.mjs build:web",
     "godot:preview:web": "node scripts/preview-godot.mjs",
