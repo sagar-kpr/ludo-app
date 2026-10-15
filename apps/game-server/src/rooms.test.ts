@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
+import { EMOTION_STICKERS } from '../../../packages/shared/src/stickers';
 import { DICE_ROLL_MS } from '../../../packages/shared/src/dice';
 
 const port = 19000 + Math.floor(Math.random() * 1000);
@@ -46,12 +47,12 @@ async function client() {
   await once(socket, 'open');
   return socket;
 }
-function receive(socket: WebSocket, type: string) {
+function receive(socket: WebSocket, type: string, accept = (_event: any) => true) {
   return new Promise<any>((resolve, reject) => {
     const timer = setTimeout(() => { socket.off('message', listener); reject(new Error(`Missing ${type}`)); }, 3000);
     const listener = (data: unknown) => {
       const event = JSON.parse(String(data));
-      if (event.type === type) { clearTimeout(timer); socket.off('message', listener); resolve(event); }
+      if (event.type === type && accept(event)) { clearTimeout(timer); socket.off('message', listener); resolve(event); }
     };
     socket.on('message', listener);
   });
@@ -119,8 +120,8 @@ it('rejects unknown codes and joins an existing room without creating another', 
   const guestStarted = receive(guest, 'STATE');
   host.send(JSON.stringify({ type: 'START_GAME' }));
   const started = await hostStarted;
-  expect(started.turnDurationMs).toBe(60000);
-  expect(started.turnDeadline - started.serverTime).toBeGreaterThanOrEqual(59000);
+  expect(started.turnDurationMs).toBe(30000);
+  expect(started.turnDeadline - started.serverTime).toBeGreaterThanOrEqual(29000);
   let match = started.state;
   expect((await guestStarted).state).toEqual(match);
   expect(match.phase).toBe('rolling');
@@ -199,3 +200,71 @@ it('rejects unknown codes and joins an existing room without creating another', 
   }
 
 }, 60000);
+it('leaves immediately, synchronizes departure, and allows the same connection to create another room', async () => {
+  const host = await client();
+  const guest = await client();
+  const third = await client();
+  const created = receive(host, 'ROOM_CREATED');
+  host.send(JSON.stringify({ type: 'CREATE_ROOM', name: 'Host' }));
+  const { roomCode } = await created;
+  for (const socket of [guest, third]) {
+    const joined = receive(socket, 'STATE');
+    socket.send(JSON.stringify({ type: 'JOIN_ROOM', code: roomCode, name: 'Guest' }));
+    await joined;
+  }
+  const started = receive(host, 'STATE');
+  host.send(JSON.stringify({ type: 'START_GAME' }));
+  const initial = await started;
+  const leavingId = initial.state.currentPlayer;
+  const acknowledged = receive(host, 'LEFT_ROOM');
+  const updated = receive(guest, 'STATE', event => event.state.version > initial.state.version);
+  host.send(JSON.stringify({ type: 'LEAVE_GAME', playerId: initial.state.players[1].id }));
+  await acknowledged;
+  const after = await updated;
+  expect(after.state.players.map((p: any) => p.id)).not.toContain(leavingId);
+  expect(after.state.departedPlayers[0].id).toBe(leavingId);
+  expect(after.state.currentPlayer).toBe(initial.state.players[1].id);
+  expect(after.state.phase).toBe('rolling');
+  expect(after.state.tokens).toHaveLength(8);
+  const winner = receive(third, 'STATE', event => event.state.phase === 'finished');
+  const guestLeft = receive(guest, 'LEFT_ROOM');
+  guest.send(JSON.stringify({ type: 'LEAVE_GAME' }));
+  await guestLeft;
+  const final = await winner;
+  expect(final.state.phase).toBe('finished');
+  expect(final.state.winner).toBe(initial.state.players[2].id);
+  expect(final.turnDeadline).toBe(0);
+  const recreated = receive(host, 'ROOM_CREATED');
+  host.send(JSON.stringify({ type: 'CREATE_ROOM', name: 'Again' }));
+  expect((await recreated).roomCode).not.toBe(roomCode);
+  const recovered = receive(host, 'STATE');
+  host.send(JSON.stringify({ type: 'SYNC_STATE' }));
+  expect((await recovered).state.departedPlayers ?? []).toEqual([]);
+});
+
+it('delivers every emotion reaction to both players and rejects invalid or self-targeted reactions', async () => {
+  const host = await client();
+  const guest = await client();
+  const created = receive(host, 'ROOM_CREATED');
+  host.send(JSON.stringify({ type: 'CREATE_ROOM', name: 'Sender' }));
+  const room = await created;
+  const joined = receive(guest, 'STATE');
+  guest.send(JSON.stringify({ type: 'JOIN_ROOM', code: room.roomCode, name: 'Recipient' }));
+  const snapshot = await joined;
+  const targetPlayerId = snapshot.state.players[1].id;
+  for (const sticker of EMOTION_STICKERS) {
+    const delivery = [host, guest].map(socket => receive(socket, 'STICKER'));
+    host.send(JSON.stringify({ type: 'SEND_STICKER', targetPlayerId, sticker }));
+    const [sent, received] = await Promise.all(delivery);
+    expect(sent).toEqual(received);
+    expect(received).toMatchObject({ sticker, targetPlayerId, fromPlayerId: room.playerId });
+  }
+  for (const intent of [
+    { type: 'SEND_STICKER', targetPlayerId, sticker: 'UNKNOWN_EMOTION' },
+    { type: 'SEND_STICKER', targetPlayerId: room.playerId, sticker: 'HAPPY' },
+  ]) {
+    const error = receive(host, 'ERROR');
+    host.send(JSON.stringify(intent));
+    expect((await error).message).toContain('valid player and sticker');
+  }
+});

@@ -40,9 +40,9 @@ func run() -> void:
 				check(coordinate.x >= 0 and coordinate.x < 15 and coordinate.y >= 0 and coordinate.y < 15, "Coordinate out of bounds")
 	check(not BoardMath.legal({"position":0},5), "Base requires six")
 	check(BoardMath.legal({"position":0},6), "Six allows base entry")
-	check(not BoardMath.legal({"position":57},2), "Cannot overshoot home")
-	check(BoardMath.legal({"position":57},1), "Exact home entry")
-	check(not BoardMath.legal({"position":58},1), "Finished pawn cannot move")
+	check(BoardMath.legal({"position":BoardMath.HOME-1},1), "Final lane cell can enter the finish triangle")
+	check(not BoardMath.legal({"position":BoardMath.HOME},1), "Finish triangle is immediately terminal")
+	check(not BoardMath.legal({"position":58},1), "Legacy finished pawn cannot move")
 	await check_token_framing()
 	# Two complete Godot clients connected to the real local Node.js server.
 	host = MainScene.instantiate()
@@ -65,15 +65,11 @@ func run() -> void:
 	host.send({"type":"START_GAME"})
 	check(await wait_until(func(): return host.game.get("phase") == "rolling" and friend.game.get("phase") == "rolling"), "Host starts match")
 	check(host.board.pawns.size() == 8, "Eight pawns modeled for two players")
-	check(host.turn_duration_ms == 60000 and friend.turn_duration_ms == 60000,"Both clients receive the one-minute turn duration")
+	check(host.turn_duration_ms == 30000 and friend.turn_duration_ms == 30000,"Both clients receive the 30-second phase duration")
+	check(host.board.board_plane.mesh is PlaneMesh,"Board artwork is a flat printed surface")
+	check(host.board.artwork_viewport.size == Vector2i(1024,1024),"Board artwork uses a bounded cache texture")
 	for seat in range(4):
-		var floor_mesh: MeshInstance3D = host.board.world.get_node("HomeFloor%d" % seat)
-		var rim_mesh: MeshInstance3D = host.board.world.get_node("HomeRim%d" % seat)
-		var floor_top := floor_mesh.position.y + floor_mesh.mesh.get_aabb().end.y
-		var rim_top := rim_mesh.position.y + rim_mesh.mesh.get_aabb().end.y
-		check(floor_mesh.mesh is PlaneMesh and rim_mesh.mesh is PlaneMesh,"Home floor and outline are flat printed surfaces")
-		check(floor_top >= rim_top,"White home inset is visible above its printed outline")
-		check(BoardMath.world(BoardMath.COLORS[seat],0,0).y > floor_top,"Home pawn sits above the flat board")
+		check(BoardMath.world(BoardMath.COLORS[seat],0,0).y > host.board.board_plane.position.y,"Home pawn sits above the flat board")
 	for pawn in host.board.pawns.values():
 		var body: MeshInstance3D = pawn.get_node("PinVisual/PinBody")
 		check(body.material_override is ShaderMaterial, "Location pin has portable glossy studio material")
@@ -85,7 +81,7 @@ func run() -> void:
 	await process_frame
 	check(host.game_background.visible, "Clean game background is visible during play")
 	check(host.game_background.get_child(0) is ColorRect, "Game background has no decorative artwork")
-	check(host.cards[0].custom_minimum_size.y == 148 and host.cards[0].dice.custom_minimum_size.x == 72, "Player cards reserve room for video squares, dice and social toolbar")
+	check(host.cards[0].avatar.size.y > host.cards[0].roll.size.y and host.cards[0].roll.size.y >= 48, "Avatars are taller than the dice while preserving a usable roll button")
 	check(not host.board.get_global_rect().intersects(host.cards[0].get_global_rect()), "Top player card does not overlap board")
 	check(not host.board.get_global_rect().intersects(host.cards[3].get_global_rect()), "Bottom player card does not overlap board")
 	check(host.cards[1].invite.visible and host.cards[3].invite.visible and not host.cards[2].invite.visible, "Only open seats expose invite controls")
@@ -133,8 +129,8 @@ func run() -> void:
 	check(host.sticker_title.text == "Send to Godot Friend","Sticker header names the tapped recipient without a dropdown")
 	check(host.sticker_title.size.x >= 160 and host.sticker_title.size.y >= 24 and host.sticker_title.autowrap_mode == TextServer.AUTOWRAP_OFF,"Recipient name remains visible in the compact single-line popup header")
 	check(host.sticker_picker.get_child(0).get_child(0).size.y <= 36 and host.sticker_picker.size.y < 440,"Sticker popup has a compact header rather than an oversized blank block")
-	var sticker_grid = host.sticker_picker.get_child(0).get_child(1)
-	var hammer_choice = sticker_grid.get_child(8)
+	var sticker_grid = host.sticker_grid
+	var hammer_choice = sticker_grid.get_children().filter(func(choice): return choice.get_child(0).kind == "HAMMER")[0]
 	check(hammer_choice.get_child(0).kind == "HAMMER", "Hammer option contains rendered artwork")
 	hammer_choice.pressed.emit()
 	check(await wait_until(func(): return host.sticker_layer.get_child_count() > 0 and friend.sticker_layer.get_child_count() > 0), "Sticker reaches sender and recipient over real server")
@@ -249,14 +245,14 @@ func run() -> void:
 	check(host.board.token_at_screen(stack_point).begins_with(host.self_id+"-"), "Mixed stacks cannot let an opponent occlude a selectable pin")
 	host.board.leave_trail(Vector3.ZERO,host.board.BOARD_COLORS.coral)
 	check(not host.board.trails.is_empty(), "Each step creates a colored fading trail")
-	await create_timer(0.8).timeout
+	await create_timer(1.55).timeout
 	check(host.board.trails.is_empty(), "Step trails clean themselves up")
 	fixture.phase = "finished"
 	fixture.finishOrder = [host.self_id,friend.self_id]
 	fixture.winner = host.self_id
 	for token in fixture.tokens:
 		if token.color == fixture.players[0].color:
-			token.position = 58
+			token.position = BoardMath.HOME
 	host.game = fixture.duplicate(true)
 	friend.game = fixture.duplicate(true)
 	host.show_state()
@@ -276,7 +272,7 @@ func run() -> void:
 	host.game = fixture
 	host.show_state()
 	check(not host.result.visible and host.board.rank_labels.is_empty(), "Restart clears results and placement badges")
-	for kind in ["PARTY","CLAP","LOVE","LAUGH","FIRE","COOL","GIFT","TROPHY","HAMMER","BOOM","CROWN","CLOWN","PUNCH","KISS","TOMATO","EGG"]:
+	for kind in host.StickerArt.CATALOG:
 		host.show_sticker({"targetPlayerId":friend.self_id,"fromPlayerId":host.self_id,"sticker":kind})
 		await process_frame
 		var effect = host.sticker_layer.get_child(host.sticker_layer.get_child_count()-1)

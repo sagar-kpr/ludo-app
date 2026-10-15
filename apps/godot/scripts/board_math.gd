@@ -4,6 +4,7 @@ extends RefCounted
 const COLORS = ["coral", "sun", "mint", "violet"]
 const OFFSETS = {"coral": 0, "sun": 13, "mint": 26, "violet": 39}
 const SAFE = [0, 8, 13, 21, 26, 34, 39, 47]
+const HOME = 57
 const TRACK = [
 	[6,1],[6,2],[6,3],[6,4],[6,5],[5,6],[4,6],[3,6],[2,6],[1,6],[0,6],[0,7],[0,8],
 	[1,8],[2,8],[3,8],[4,8],[5,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[7,14],[8,14],
@@ -16,8 +17,8 @@ static func coordinate(color: String, position: int, token_index: int) -> Vector
 	if position == 0:
 		var bases := [Vector2i(1,1), Vector2i(1,10), Vector2i(10,10), Vector2i(10,1)]
 		return bases[seat] + Vector2i(1 + (2 if token_index >= 2 else 0), 1 + 2 * (token_index % 2))
-	if position == 58:
-		return Vector2i(7,7)
+	if position >= HOME:
+		return [Vector2i(7,6), Vector2i(6,7), Vector2i(7,8), Vector2i(8,7)][seat]
 	if position <= 51:
 		var square: Array = TRACK[(int(OFFSETS[color]) + position - 1) % 52]
 		return Vector2i(square[0], square[1])
@@ -30,13 +31,26 @@ static func world(color: String, position: int, token_index: int) -> Vector3:
 		var center: Vector2 = centers[COLORS.find(color)]
 		return Vector3(center.x+(-1.0 if token_index % 2 == 0 else 1.0),0.22,center.y+(-1.0 if token_index < 2 else 1.0))
 	var square := coordinate(color, position, token_index)
+	if position >= HOME:
+		# Four finished pins fit within their own colored center triangle.
+		return Vector3(square.y - 7 + (-0.23 if token_index % 2 == 0 else 0.23), 0.22, square.x - 7 + (-0.20 if token_index < 2 else 0.20))
 	return Vector3(square.y - 7,0.22,square.x - 7)
 
-static func legal(token: Dictionary, dice: int) -> bool:
-	# UI affordance only; the server still validates every move.
+static func legal(token: Dictionary, dice: int, tokens: Array = []) -> bool:
+	# UI affordance only; mirror authoritative movement and destination checks.
 	var position := int(token.position)
-	# HOME is terminal. Keep this explicit so a finished pawn cannot become
-	# selectable during a stale snapshot/animation handoff.
-	if position >= 58:
+	if dice < 1 or dice > 6 or position >= HOME or (position == 0 and dice != 6):
 		return false
-	return dice > 0 and (dice == 6 if position == 0 else true)
+	var destination := 1 if position == 0 else position + dice
+	if destination > HOME:
+		return false
+	if destination == HOME:
+		return true
+	if tokens.is_empty():
+		return true
+	if destination <= 51 and (int(OFFSETS[token.color]) + destination - 1) % 52 in SAFE:
+		return true
+	for other in tokens:
+		if other.id != token.id and other.color == token.color and int(other.position) == destination:
+			return false
+	return true

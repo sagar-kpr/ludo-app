@@ -3,6 +3,7 @@ extends Control
 const Design = preload("res://scripts/design.gd")
 const Realtime = preload("res://scripts/realtime.gd")
 const Board = preload("res://scripts/board.gd")
+const BoardMath = preload("res://scripts/board_math.gd")
 const PlayerCard = preload("res://scripts/player_card.gd")
 const GameBackground = preload("res://scripts/game_background.gd")
 const Feedback = preload("res://scripts/feedback.gd")
@@ -42,6 +43,8 @@ var chat_log: RichTextLabel
 var chat_input: LineEdit
 var chat_dialog: AcceptDialog
 var menu: AcceptDialog
+var leave_dialog: ConfirmationDialog
+var exit_scheduled := false
 var result: AcceptDialog
 var result_stats: Label
 var restart_button: Button
@@ -53,15 +56,20 @@ var media_status: Label
 var game_background
 var brand_label: Label
 var turn_deadline_ticks := 0
-var turn_duration_ms := 60000
+var turn_duration_ms := 30000
 var sticker_picker: PopupPanel
 var sticker_target := ""
 var sticker_layer: Control
 var sticker_title: Label
+var sticker_scroll: ScrollContainer
+var sticker_grid: GridContainer
+var sticker_anchor: Control
 var web_form_ready := false
 var web_form_elapsed := 0.0
 
 func _process(delta: float) -> void:
+	if is_instance_valid(sticker_picker) and sticker_picker.visible:
+		position_sticker_picker()
 	web_form_elapsed += delta
 	if OS.has_feature("web") and web_form_elapsed >= 0.1 and is_instance_valid(name_input):
 		web_form_elapsed = 0
@@ -151,6 +159,7 @@ func _ready() -> void:
 	for card in cards:
 		card.gift_pressed.connect(open_sticker_picker)
 		card.chat_pressed.connect(open_table_chat)
+		card.leave_pressed.connect(open_leave_confirmation)
 		card.camera_pressed.connect(func(): menu.popup_centered())
 		card.dice.roll_contact.connect(func(settled: bool, strength: float):
 			feedback.cue("dice_settle" if settled else "dice",card.player_id == self_id,strength)
@@ -363,6 +372,11 @@ func build_ui() -> void:
 		row.add_theme_constant_override("separation", 8)
 		game_view.add_child(row)
 		for slot in range(2):
+			if slot == 1:
+				var spacer := Control.new()
+				spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				row.add_child(spacer)
 			var seat := slot if pair == 0 else 3 - slot
 			var card := PlayerCard.new()
 			row.add_child(card)
@@ -395,6 +409,14 @@ func build_ui() -> void:
 	add_child(sticker_layer)
 
 func build_dialogs() -> void:
+	leave_dialog = ConfirmationDialog.new()
+	leave_dialog.title = "Leave game?"
+	leave_dialog.dialog_text = "Do you really want to leave the game?"
+	leave_dialog.ok_button_text = "Yes, leave"
+	leave_dialog.cancel_button_text = "Stay"
+	leave_dialog.min_size = Vector2i(280,140)
+	leave_dialog.confirmed.connect(func(): send({"type":"LEAVE_GAME"}))
+	add_child(leave_dialog)
 	chat_dialog = AcceptDialog.new()
 	chat_dialog.title = "Table chat"
 	chat_dialog.min_size = Vector2i(280, 320)
@@ -432,6 +454,9 @@ func build_dialogs() -> void:
 			pawn.reduced_motion = value
 		for card in cards:
 			card.dice.reduced_motion = value
+		for choice in sticker_grid.get_children():
+			var artwork = choice.get_child(0)
+			artwork.playing = artwork.kind in StickerArt.EMOTIONS and not value
 		config.set_value("accessibility", "reduced_motion", value)
 		config.save("user://preferences.cfg")
 	)
@@ -480,16 +505,21 @@ func build_dialogs() -> void:
 
 func build_sticker_picker() -> void:
 	sticker_picker = PopupPanel.new()
-	sticker_picker.add_theme_stylebox_override("panel",Design.surface(Color("f7f9ff"),16,Color("ffd34d")))
+	sticker_picker.name = "EmojiPicker"
+	var surface := Design.surface(Color("14263f"),16,Color("38618b"))
+	surface.content_margin_left = 12
+	surface.content_margin_right = 12
+	surface.shadow_size = 0
+	sticker_picker.add_theme_stylebox_override("panel",surface)
 	add_child(sticker_picker)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation",8)
 	sticker_picker.add_child(column)
 	var heading := HBoxContainer.new()
 	heading.custom_minimum_size.y = 28
-	heading.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	heading.add_theme_constant_override("separation",8)
 	column.add_child(heading)
-	sticker_title = label("Send a sticker",15,Design.INK)
+	sticker_title = label("Send a sticker",14,Design.INK)
 	sticker_title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	sticker_title.custom_minimum_size = Vector2(160,24)
 	sticker_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -499,66 +529,127 @@ func build_sticker_picker() -> void:
 	var close := Button.new()
 	close.text = "×"
 	close.tooltip_text = "Close sticker picker"
+	close.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	close.custom_minimum_size = Vector2(28,28)
 	close.add_theme_font_size_override("font_size",20)
 	close.add_theme_color_override("font_color",Design.INK)
-	for state in ["normal","hover","pressed"]:
-		var style := Design.surface(Color("e9edf5"),8,Color("d9e2f2"))
-		style.content_margin_left = 3
-		style.content_margin_right = 3
-		style.content_margin_top = 0
-		style.content_margin_bottom = 0
+	for state in ["normal","hover","pressed","focus"]:
+		var style := Design.surface(Color("1d3757") if state == "normal" else Color("2d527b"),8,Color("38618b"))
+		style.set_content_margin_all(0)
+		style.shadow_size = 0
 		close.add_theme_stylebox_override(state,style)
 	close.pressed.connect(func(): sticker_picker.hide())
 	heading.add_child(close)
-	var grid := GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation",6)
-	grid.add_theme_constant_override("v_separation",6)
-	column.add_child(grid)
-	for sticker in ["PARTY","CLAP","LOVE","LAUGH","FIRE","COOL","GIFT","TROPHY","HAMMER","BOOM","CROWN","CLOWN","PUNCH","KISS","TOMATO","EGG"]:
+	sticker_scroll = ScrollContainer.new()
+	sticker_scroll.follow_focus = true
+	sticker_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sticker_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	column.add_child(sticker_scroll)
+	sticker_grid = GridContainer.new()
+	sticker_grid.columns = 4
+	sticker_grid.add_theme_constant_override("h_separation",6)
+	sticker_grid.add_theme_constant_override("v_separation",6)
+	sticker_scroll.add_child(sticker_grid)
+	for sticker in StickerArt.CATALOG:
 		var choice := Button.new()
-		choice.text = sticker
-		choice.custom_minimum_size = Vector2(66,82)
-		choice.alignment = HORIZONTAL_ALIGNMENT_CENTER
-		choice.add_theme_constant_override("outline_size",0)
-		choice.add_theme_font_size_override("font_size",11)
-		choice.add_theme_color_override("font_color",Design.INK)
-		choice.add_theme_color_override("font_hover_color",Design.INK)
-		choice.add_theme_color_override("font_pressed_color",Design.INK)
-		choice.add_theme_color_override("font_focus_color",Design.INK)
-		choice.add_theme_stylebox_override("normal",Design.surface(Color.WHITE,12,Color("d9e2f2")))
-		choice.add_theme_stylebox_override("hover",Design.surface(Color("fff5cb"),12,Color("ffd34d")))
+		choice.text = StickerArt.caption(sticker)
+		choice.tooltip_text = "Send " + sticker.to_lower()
+		choice.custom_minimum_size = Vector2(56,64)
+		choice.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		choice.add_theme_font_size_override("font_size",10)
+		for state in ["font_color","font_hover_color","font_pressed_color","font_focus_color"]:
+			choice.add_theme_color_override(state,Design.INK)
+		for state in ["normal","hover","pressed","focus"]:
+			var style := Design.surface(Color("1c3555") if state == "normal" else Color("285483"),10,Color("35577c") if state == "normal" else Design.GOLD)
+			style.shadow_size = 0
+			style.content_margin_left = 4
+			style.content_margin_right = 4
+			style.content_margin_top = 48
+			style.content_margin_bottom = 5
+			choice.add_theme_stylebox_override(state,style)
 		var artwork := StickerArt.new()
 		artwork.kind = sticker
-		artwork.position = Vector2(4,2)
-		artwork.size = Vector2(58,58)
+		artwork.playing = sticker in StickerArt.EMOTIONS and not reduced_motion
+		artwork.position = Vector2(5,2)
+		artwork.size = Vector2(46,46)
 		choice.add_child(artwork)
-		# Put the readable caption beneath the artwork.
-		var normal_style := Design.surface(Color.WHITE,12,Color("d9e2f2"))
-		normal_style.content_margin_top = 58
-		normal_style.content_margin_bottom = 5
-		choice.add_theme_stylebox_override("normal",normal_style)
-		var hover_style := normal_style.duplicate()
-		hover_style.bg_color = Color("fff5cb")
-		choice.add_theme_stylebox_override("hover",hover_style)
-		choice.add_theme_stylebox_override("pressed",hover_style)
 		choice.pressed.connect(func(): send_sticker(sticker))
-		grid.add_child(choice)
+		sticker_grid.add_child(choice)
+
+func position_sticker_picker() -> void:
+	if not is_instance_valid(sticker_anchor) or not sticker_anchor.is_visible_in_tree():
+		sticker_picker.hide()
+		return
+	var anchor := sticker_anchor.get_global_rect()
+	var bounds := get_viewport_rect().grow(-8)
+	var width := minf(280,bounds.size.x)
+	var below := bounds.end.y-anchor.end.y-8
+	var above := anchor.position.y-bounds.position.y-8
+	# Prefer below; a short scrollable picker keeps bottom-row icons nearby.
+	# Only flip above when there isn't room for the heading and one full row.
+	var open_below := below >= 128 or below >= above
+	var height := minf(344,below if open_below else above)
+	height = maxf(100,height)
+	sticker_scroll.custom_minimum_size.y = maxf(32,height-56)
+	var at := Vector2(clampf(anchor.position.x,bounds.position.x,bounds.end.x-width),anchor.end.y+8 if open_below else anchor.position.y-height-8)
+	at.y = clampf(at.y,bounds.position.y,bounds.end.y-height)
+	var rect := Rect2(at,Vector2(width,height))
+	if not sticker_picker.is_embedded():
+		rect = get_viewport().get_screen_transform()*rect
+	sticker_picker.size = Vector2i(rect.size)
+	sticker_picker.position = Vector2i(rect.position)
 
 func open_sticker_picker(target_player_id: String) -> void:
 	if not online or target_player_id.is_empty() or target_player_id == self_id:
 		return
 	sticker_target = ""
+	sticker_anchor = null
+	for card in cards:
+		if card.player_id == target_player_id:
+			sticker_anchor = card.gift
+			break
 	for player in game.get("players",[]):
 		if str(player.id) == target_player_id:
 			sticker_target = target_player_id
 			sticker_title.text = "Send to " + str(player.name)
 			break
-	if sticker_target.is_empty():
+	if sticker_target.is_empty() or not is_instance_valid(sticker_anchor):
 		return
-	sticker_picker.reset_size()
-	sticker_picker.popup_centered()
+	sticker_scroll.scroll_vertical = 0
+	position_sticker_picker()
+	sticker_picker.popup(Rect2i(sticker_picker.position,sticker_picker.size))
+
+func open_leave_confirmation() -> void:
+	if online and not pending and not presenting and not room_code.is_empty():
+		leave_dialog.popup_centered()
+
+func return_home() -> void:
+	room_code = ""
+	game = {}
+	latest_version = -1
+	turn_deadline_ticks = 0
+	pending = false
+	presenting = false
+	awaiting_move_state = false
+	exit_scheduled = false
+	board.apply_state({},self_id)
+	for dialog in [result,leave_dialog,chat_dialog,menu,sticker_picker]:
+		dialog.hide()
+	home.show()
+	lobby.hide()
+	game_view.hide()
+	content.get_node("SetupScroll").show()
+	brand_label.add_theme_color_override("font_color",Design.INK)
+	notice.text = "You left the game. Create or join another room."
+	_safe_area()
+
+func finish_departure_match(code: String) -> void:
+	await get_tree().create_timer(4.0).timeout
+	if room_code == code and game.get("phase") == "finished" and online:
+		# Detach on the server too, so creating another room works immediately.
+		if network.send_intent({"type":"LEAVE_GAME"}):
+			pending = true
+			refresh_controls()
 
 func open_table_chat() -> void:
 	for card in cards:
@@ -599,7 +690,8 @@ func show_sticker(event: Dictionary) -> void:
 	effect.reduced_motion = reduced_motion
 	effect.set_meta("target_player_id",target_id)
 	effect.contact.connect(func(kind: String):
-		feedback.cue("sticker_hit" if kind in ["HAMMER","BOOM","PUNCH","TOMATO","EGG"] else "sticker_cheer",target_id == self_id)
+		var cue := "chat" if kind in ["ANGRY","SAD","CRY","SURPRISED","THINKING"] else "sticker_hit" if kind in ["HAMMER","BOOM","PUNCH","TOMATO","EGG"] else "sticker_cheer"
+		feedback.cue(cue,target_id == self_id)
 	)
 	sticker_layer.add_child(effect)
 	if str(event.get("fromPlayerId","")) == self_id:
@@ -636,11 +728,6 @@ func send_chat() -> void:
 
 func _receive(event: Dictionary) -> void:
 	if str(event.get("type","")) == "STATE":
-		if event.get("recovered",false):
-			pending = false
-			presenting = false
-			awaiting_move_state = false
-			events.clear()
 		var remaining := maxi(0,int(event.get("turnDeadline",0))-int(event.get("serverTime",0)))
 		event["deadlineTicks"] = Time.get_ticks_msec()+remaining if remaining > 0 else 0
 	# Social messages bypass dice/move animation waits, but keep server receipt order.
@@ -677,6 +764,10 @@ func present_event(event: Dictionary) -> void:
 			elif event.get("resumed",false):
 				notice.text = "Connection restored. Resuming your game…"
 			self_id = str(event.playerId)
+		"LEFT_ROOM":
+			return_home()
+			if event.get("reason","") == "inactivity":
+				notice.text = "Timer expired with no chances left. You left the game."
 		"ERROR":
 			pending = false
 			notice.text = str(event.message)
@@ -692,10 +783,23 @@ func present_event(event: Dictionary) -> void:
 			var snapshot: Dictionary = event.state
 			if int(snapshot.get("version",0)) < latest_version:
 				return
+			if event.get("recovered", false):
+				# Focus/connection checks must wait behind queued dice and moves.
+				# If the move event was missed, recover its per-cell presentation.
+				presenting = true
+				refresh_controls()
+				await board.reconcile_state(snapshot)
+				presenting = false
+				awaiting_move_state = false
+			# Missing pawns dissolve together before applying the new table state.
+			presenting = true
+			refresh_controls()
+			await board.animate_departures(snapshot)
+			presenting = false
 			latest_version = int(snapshot.get("version",0))
 			game = snapshot
 			turn_deadline_ticks = int(event.get("deadlineTicks",0))
-			turn_duration_ms = int(event.get("turnDurationMs",60000))
+			turn_duration_ms = int(event.get("turnDurationMs",30000))
 			pending = false
 			show_state()
 			# TOKEN_MOVED is followed by this authoritative snapshot. Do not
@@ -707,7 +811,7 @@ func present_event(event: Dictionary) -> void:
 			presenting = true
 			pending = false
 			refresh_controls()
-			board.highlight_player(str(event.color))
+			board.highlight_player(str(event.color),int(event.value))
 			notice.text = "Rolling…"
 			var roller = null
 			for card in cards:
@@ -724,6 +828,9 @@ func present_event(event: Dictionary) -> void:
 			notice.text += " · " + ("No legal move; next player." if event.get("skipped",false) else "Moving the only legal pawn." if event.get("automatic",false) else "Choose a highlighted pawn.")
 			presenting = false
 		"TOKEN_MOVED":
+			var move_version := int(event.get("version", -1))
+			if move_version >= 0 and move_version <= latest_version:
+				return
 			presenting = true
 			awaiting_move_state = true
 			refresh_controls()
@@ -774,11 +881,17 @@ func show_state() -> void:
 				if player.id == order[rank]:
 					var home_count := 0
 					for token in game.get("tokens",[]):
-						if token.color == player.color and int(token.position) == 58:
+						if token.color == player.color and int(token.position) >= BoardMath.HOME:
 							home_count += 1
 					lines.append("%s  %s · %d/4 home" % [["1st","2nd","3rd","4th"][rank],str(player.name),home_count])
 		result_stats.text = "\n\n".join(lines)
-		restart_button.visible = not players.is_empty() and players[0].id == self_id
+		var last_player: bool = players.size() == 1 and not game.get("departedPlayers",[]).is_empty()
+		restart_button.visible = not last_player and not players.is_empty() and players[0].id == self_id
+		if last_player:
+			result_stats.text = str(players[0].name) + " wins!\n\nReturning to home…"
+			if not exit_scheduled:
+				exit_scheduled = true
+				finish_departure_match(room_code)
 		if not result.visible:
 			chat_dialog.hide()
 			menu.hide()
@@ -808,12 +921,19 @@ func refresh_controls() -> void:
 			if candidate.get("color","") == ["coral","sun","mint","violet"][seat]:
 				player = candidate
 				break
-		var active: bool = not player.is_empty() and player.id == game.get("currentPlayer") and game.get("phase") in ["rolling","moving"]
+		if player.is_empty():
+			for departed in game.get("departedPlayers",[]):
+				if departed.get("color","") == ["coral","sun","mint","violet"][seat]:
+					player = departed.duplicate()
+					player["departed"] = true
+					break
+		var rank: int = game.get("finishOrder",[]).find(player.get("id",""))
+		var active: bool = rank < 0 and not player.is_empty() and player.id == game.get("currentPlayer") and game.get("phase") in ["rolling","moving"]
 		var own: bool = not player.is_empty() and player.id == self_id
 		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own)
 		cards[seat].visible = not player.is_empty()
+		cards[seat].leave_button.disabled = not online or pending or presenting
+		cards[seat].set_lives(int(game.get("timeoutLives",{}).get(player.get("id",""),5)))
+		cards[seat].set_rank(rank)
 		cards[seat].set_clock(turn_deadline_ticks,turn_duration_ms,active and not presenting,own)
-		var rank: int = game.get("finishOrder",[]).find(player.get("id",""))
-		if rank >= 0:
-			cards[seat].status_label.text = ["1st","2nd","3rd","4th"][rank]
 	_safe_area()

@@ -200,7 +200,7 @@ try {
   fixture.state.phase='finished';fixture.state.dice=null;fixture.state.version++;
   fixture.state.finishOrder=fixture.state.players.map(player=>player.id);
   fixture.state.winner=hostId;
-  for(const token of fixture.state.tokens)if(token.color===fixture.state.players[0].color)token.position=58;
+  for(const token of fixture.state.tokens)if(token.color===fixture.state.players[0].color)token.position=57;
   for(const page of [host,friend]) {
     await page.evaluate(event=>window.__ludoSockets.at(-1).dispatchEvent(new MessageEvent('message',{data:JSON.stringify(event)})),fixture);
     await page.waitForTimeout(1200);

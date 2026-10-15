@@ -39,6 +39,10 @@ func _draw() -> void:
 		"camera":
 			draw_rect(Rect2(-7,-4,9,8),ink,false,1.5)
 			draw_polyline(PackedVector2Array([Vector2(2,-2),Vector2(7,-4),Vector2(7,4),Vector2(2,2)]),ink,1.5,true)
+		"leave":
+			draw_polyline(PackedVector2Array([Vector2(-1,-6),Vector2(-7,-6),Vector2(-7,6),Vector2(-1,6)]),ink,1.5,true)
+			draw_line(Vector2(-3,0),Vector2(7,0),ink,1.5,true)
+			draw_polyline(PackedVector2Array([Vector2(3,-4),Vector2(7,0),Vector2(3,4)]),ink,1.5,true)
 		"emoji":
 			draw_arc(Vector2.ZERO,6,0,TAU,32,ink,1.5,true)
 			draw_circle(Vector2(-2,-2),0.8,ink)

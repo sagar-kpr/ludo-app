@@ -2,17 +2,18 @@ import 'dotenv/config';
 import { randomBytes, randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { autoMoveToken, createGame, moveToken, rollDice, startGame, restartGame, removePlayer, type Color, type GameState, type Player } from '../../../packages/game-engine/src/index';
+import { MAX_TIMEOUT_LIVES, diceSidesForRoll, autoMoveToken, createGame, moveToken, rollDice, startGame, restartGame, removePlayer, type Color, type GameState, type Player } from '../../../packages/game-engine/src/index';
 import { STEP_MS } from '../../../packages/game-engine/src/motion';
+import { STICKERS } from '../../../packages/shared/src/stickers';
 import { DICE_ROLL_MS } from '../../../packages/shared/src/dice';
 import { persistChat, persistRoom, persistenceEnabled } from './persistence';
-import { expireTurn } from './turn-clock';
+import { turnTimeoutAction } from './turn-clock';
 
-type ClientMessage = { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
+type ClientMessage = { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
 type Client = { socket: WebSocket; playerId: string; sessionToken: string; roomCode?: string; disconnectTimer?: ReturnType<typeof setTimeout> };
 type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number };
-const configuredTurnMs = Number(process.env.TURN_TIMEOUT_MS || 60000);
-const turnDurationMs = Number.isFinite(configuredTurnMs) ? Math.max(1000, Math.min(120000, configuredTurnMs)) : 60000;
+const configuredTurnMs = Number(process.env.TURN_TIMEOUT_MS || 30000);
+const turnDurationMs = Number.isFinite(configuredTurnMs) ? Math.max(1000, Math.min(120000, configuredTurnMs)) : 30000;
 const rooms = new Map<string, Room>();
 const sessions = new Map<string, Client>();
 const reconnectGraceMs = Math.max(500, Number(process.env.RECONNECT_GRACE_MS) || 90000);
@@ -32,14 +33,35 @@ function resetClock(room: Room) {
 }
 function expireRoom(room: Room) {
   if (!room.turnDeadline || Date.now() < room.turnDeadline || Date.now() < room.busyUntil) return false;
-  room.state = expireTurn(room.state);
-  resetClock(room);
-  state(room);
+  const action = turnTimeoutAction(room.state, () => randomInt(0, 0x1000000) / 0x1000000);
+  if (!action) return false;
+  if (action.type === 'pass') {
+    // An impossible move is not inactivity; there was no choice to make.
+    room.state = action.state;
+    resetClock(room);
+    state(room);
+    return true;
+  }
+  const previous = room.state;
+  const playerId = previous.currentPlayer;
+  const lives = previous.timeoutLives?.[playerId] ?? MAX_TIMEOUT_LIVES;
+  if (lives <= 0) {
+    // Five automatic actions are allowed. Only a later missed deadline ejects
+    // the player, without rolling or moving again at zero lives.
+    const client = room.clients.get(playerId) ?? [...sessions.values()].find(session => session.playerId === playerId);
+    removeRoomPlayer(room, playerId, client, true, 'inactivity');
+    return true;
+  }
+  const remaining = lives - 1;
+  // Apply the life change atomically with the normal roll/move version.
+  room.state = { ...previous, timeoutLives: { ...previous.timeoutLives, [playerId]: remaining } };
+  const applied = action.type === 'roll' ? applyRoll(room, true) : applyMove(room, action.tokenId, true, 0, true);
+  if (!applied) { room.state = previous; return false; }
   return true;
 }
 setInterval(() => { for (const room of rooms.values()) if (room.clients.size) expireRoom(room); },100).unref();
 const fail = (socket: WebSocket, message: string) => send(socket, { type: 'ERROR', message });
-const stickers = new Set(['PARTY','CLAP','LOVE','LAUGH','FIRE','COOL','GIFT','TROPHY','HAMMER','BOOM','CROWN','CLOWN','PUNCH','KISS','TOMATO','EGG']);
+const stickers = new Set<string>(STICKERS);
 
 function createRoom(client: Client, name: string) {
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
@@ -56,7 +78,7 @@ function joinRoom(client: Client, value: string, name: string) {
   const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors.find(color => !room.players.some(player => player.color === color))!, ready: true };
   room.players.push(player); room.state = { ...createGame(room.players), version: room.state.version + 1 }; room.clients.set(client.playerId, client); client.roomCode = room.code; void persistRoom(room.code, room.players, room.state); send(client.socket, { type: 'ROOM_JOINED', roomCode: room.code, playerId: client.playerId }); state(room);
 }
-function applyMove(room: Room, tokenId: string, automatic = false, presentationMs = DICE_ROLL_MS) {
+function applyMove(room: Room, tokenId: string, automatic = false, presentationMs = DICE_ROLL_MS, timedOut = false) {
   const previous = room.state;
   const next = moveToken(previous, tokenId);
   if (next === previous) return false;
@@ -68,9 +90,49 @@ function applyMove(room: Room, tokenId: string, automatic = false, presentationM
   const delayMs = automatic ? presentationMs : 0;
   room.busyUntil = Date.now()+delayMs+durationMs;
   resetClock(room);
-  publish(room, { type: 'TOKEN_MOVED', tokenId, from, to, captured, automatic, durationMs, delayMs, version: next.version });
+  publish(room, { type: 'TOKEN_MOVED', tokenId, from, to, captured, automatic, timedOut, durationMs, delayMs, version: next.version });
   state(room);
   return true;
+}
+function applyRoll(room: Room, timedOut = false) {
+  const playerId = room.state.currentPlayer;
+  const color = room.players.find(player => player.id === playerId)?.color;
+  const sides = diceSidesForRoll(room.state);
+  const value = randomInt(1, sides + 1);
+  const next = rollDice(room.state, () => (value - 1) / sides);
+  if (next === room.state) return false;
+  room.state = next;
+  const presentationMs = DICE_ROLL_MS;
+  room.busyUntil = Date.now()+presentationMs;
+  resetClock(room);
+  const automatic = autoMoveToken(next);
+  publish(room, { type: 'DICE_ROLLED', value, playerId, color, timedOut, skipped: next.phase === 'rolling', automatic: Boolean(automatic), version: next.version });
+  if (automatic) return applyMove(room, automatic.id, true, presentationMs);
+  state(room);
+  return true;
+}
+function leaveRoom(client: Client, acknowledge = false) {
+  const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
+  if (room) removeRoomPlayer(room, client.playerId, client, acknowledge);
+}
+function removeRoomPlayer(room: Room, playerId: string, client?: Client, acknowledge = false, reason = 'voluntary') {
+  const turnDeparted = room.state.currentPlayer === playerId;
+  room.state = removePlayer(room.state, playerId);
+  room.players = room.state.players;
+  if (room.state.phase !== 'lobby') {
+    room.busyUntil = Math.max(Date.now(), room.busyUntil) + 1350;
+    if (room.state.phase === 'finished' || turnDeparted) resetClock(room);
+    else if (room.turnDeadline) room.turnDeadline += 1350;
+  }
+  // Include the leaving client in the final snapshot so it sees its pawn exit.
+  void persistRoom(room.code, room.players, room.state);
+  state(room);
+  room.clients.delete(playerId);
+  if (client) {
+    client.roomCode = undefined;
+    if (acknowledge) send(client.socket, { type: 'LEFT_ROOM', roomCode: room.code, reason });
+  }
+  if (!room.players.length) rooms.delete(room.code);
 }
 function handle(client: Client, message: ClientMessage) {
   if (message.type === 'PING') { send(client.socket, { type: 'PONG', serverTime: Date.now() }); return; }
@@ -79,6 +141,7 @@ function handle(client: Client, message: ClientMessage) {
   if (message.type === 'JOIN_ROOM') return joinRoom(client, message.code, message.name);
   if (!client.roomCode) return fail(client.socket, 'Join a room first.');
   const room = rooms.get(client.roomCode); if (!room) return fail(client.socket, 'Room expired.');
+  if (message.type === 'LEAVE_GAME') return leaveRoom(client, true);
   if (message.type === 'RESTART_GAME') {
     if (room.players.length < 2) return fail(client.socket, 'At least two players are required.');
     if (room.players[0].id !== client.playerId) return fail(client.socket, 'Only the host can restart the match.');
@@ -90,7 +153,7 @@ function handle(client: Client, message: ClientMessage) {
     void persistRoom(room.code, room.players, room.state);
     return state(room);
   }
-  if ((message.type === 'ROLL_DICE' || message.type === 'MOVE_TOKEN') && expireRoom(room)) return fail(client.socket, 'Your turn expired.');
+  if ((message.type === 'ROLL_DICE' || message.type === 'MOVE_TOKEN') && expireRoom(room)) return client.roomCode ? fail(client.socket, 'Timer expired; the server acted automatically.') : undefined;
   if ((message.type === 'ROLL_DICE' || message.type === 'MOVE_TOKEN') && Date.now() < room.busyUntil) return fail(client.socket, 'Wait for the dice or token animation to finish.');
   if (message.type === 'START_GAME') {
     if (room.players[0].id !== client.playerId) return fail(client.socket, 'Only the host can start the match.');
@@ -100,17 +163,8 @@ function handle(client: Client, message: ClientMessage) {
   }
   if (message.type === 'ROLL_DICE') {
     if (room.state.currentPlayer !== client.playerId) return fail(client.socket, 'It is not your turn.');
-    const value = randomInt(1, 7);
-    const next = rollDice(room.state, () => (value - 1) / 6);
-    if (next === room.state) return fail(client.socket, 'Dice cannot be rolled right now.');
-    room.state = next;
-    const presentationMs = DICE_ROLL_MS;
-    room.busyUntil = Date.now()+presentationMs;
-    resetClock(room);
-    const automatic = autoMoveToken(next);
-    publish(room, { type: 'DICE_ROLLED', value, playerId: client.playerId, color: room.players.find((player) => player.id === client.playerId)!.color, skipped: next.phase === 'rolling', automatic: Boolean(automatic), version: next.version });
-    if (automatic) { applyMove(room, automatic.id, true, presentationMs); return; }
-    return state(room);
+    if (!applyRoll(room)) fail(client.socket, 'Dice cannot be rolled right now.');
+    return;
   }
   if (message.type === 'MOVE_TOKEN') {
     if (room.state.currentPlayer !== client.playerId) return fail(client.socket, 'It is not your turn.');
@@ -159,16 +213,7 @@ wss.on('connection', (socket, request) => {
     client.disconnectTimer = setTimeout(() => {
       sessions.delete(client.sessionToken);
       if (!room) return;
-      const turnDeparted = room.state.currentPlayer === client.playerId;
-      room.state = removePlayer(room.state, client.playerId);
-      room.players = room.state.players;
-      if (!room.players.length) { rooms.delete(room.code); return; }
-      if (room.state.phase === 'finished' || turnDeparted) {
-        room.busyUntil = 0;
-        resetClock(room);
-      }
-      void persistRoom(room.code, room.players, room.state);
-      state(room);
+      leaveRoom(client);
     }, reconnectGraceMs);
     client.disconnectTimer.unref();
   });

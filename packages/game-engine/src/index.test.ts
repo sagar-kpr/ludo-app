@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { autoMoveToken, canMove, createGame, moveToken, rollDice, startGame, removePlayer } from './index';
+import { autoMoveToken, canMove, createGame, moveToken, rollDice, startGame, removePlayer, COLORS, HOME } from './index';
+import { tokenCoordinate } from './board';
 
 const players = [
   { id: 'a', name: 'You', color: 'coral' as const, ready: true },
@@ -31,7 +32,7 @@ describe('ludo engine', () => {
     expect(next.phase).toBe('finished');
     expect(next.finishOrder).toEqual(['b', 'a']);
   });
-  it('auto-selects only a single legal token on rolls 1–5, never on six', () => {
+  it('auto-selects exactly one legal token; six still allows a choice when base pawns remain', () => {
     const state = startGame(createGame(players));
     state.tokens[0].position = 10;
     for (const dice of [1,2,3,4,5]) expect(autoMoveToken(rollDice(state, () => (dice-1)/6))?.id).toBe('a-0');
@@ -42,7 +43,7 @@ describe('ludo engine', () => {
     expect(autoMoveToken(rollDice(state, () => 3/6))?.id).toBe('a-0');
     expect(autoMoveToken(createGame(players))).toBeUndefined();
   });
-  it('waits for a token selection even with only one legal move', () => {
+  it('keeps dice resolution separate from applying the selected move', () => {
     for (const dice of [1,2,3,4,5,6]) {
       const state = startGame(createGame(players));
       state.tokens[0].position = 10;
@@ -94,11 +95,52 @@ describe('ludo engine', () => {
   });
 	it('finishes a token on the center endpoint and detects all four finished tokens', () => {
     const state = startGame(createGame(players));
-    state.phase = 'moving'; state.dice = 2;
-    state.tokens = state.tokens.map((t) => t.color === 'coral' ? { ...t, position: t.id === 'a-0' ? 57 : 58 } : t);
+		state.phase = 'moving'; state.dice = 1;
+    state.tokens = state.tokens.map((t) => t.color === 'coral' ? { ...t, position: t.id === 'a-0' ? HOME - 1 : HOME } : t);
 		const next = moveToken(state, 'a-0');
-		expect(next.tokens.find((token) => token.id === 'a-0')?.position).toBe(58);
+		expect(next.tokens.find((token) => token.id === 'a-0')?.position).toBe(HOME);
     expect(next.winner).toBe('a');
     expect(next.phase).toBe('finished');
+  });
+  it.each(COLORS)('finishes %s immediately on its colored center triangle', (color) => {
+    const owner = { ...players[0], color };
+    const opponent = { ...players[1], color: COLORS.find(candidate => candidate !== color)! };
+    const state = startGame(createGame([owner, opponent]));
+    state.phase = 'moving'; state.dice = 1;
+    state.tokens[0].position = HOME - 1;
+    const next = moveToken(state, 'a-0');
+    const finished = next.tokens[0];
+    expect(finished.position).toBe(57);
+    expect(tokenCoordinate(finished, 0)).toEqual([[7,6],[6,7],[7,8],[8,7]][COLORS.indexOf(color)]);
+    for (const dice of [1,2,3,4,5,6]) expect(canMove(finished, dice)).toBe(false);
+    expect(next.currentPlayer).toBe('a'); // Existing bonus for finishing is retained.
+    expect(next.phase).toBe('rolling');
+  });
+  it('never reactivates a completed pawn when the next dice is one', () => {
+    const state = startGame(createGame(players));
+    state.phase = 'moving'; state.dice = 1;
+    state.tokens[0].position = HOME - 1;
+    state.tokens[1].position = 10;
+    const completed = moveToken(state, 'a-0');
+    const nextRoll = rollDice(completed, () => 0);
+    expect(nextRoll.dice).toBe(1);
+    expect(nextRoll.phase).toBe('moving');
+    expect(autoMoveToken(nextRoll)?.id).toBe('a-1');
+    expect(moveToken(nextRoll, 'a-0')).toBe(nextRoll);
+    expect(nextRoll.tokens[0].position).toBe(HOME);
+  });
+  it('passes a roll of one when all other pawns are still in base', () => {
+    const state = startGame(createGame(players));
+    state.phase = 'moving'; state.dice = 1;
+    state.tokens[0].position = HOME - 1;
+    const nextRoll = rollDice(moveToken(state, 'a-0'), () => 0);
+    expect(nextRoll.currentPlayer).toBe('b');
+    expect(nextRoll.phase).toBe('rolling');
+    expect(nextRoll.tokens[0].position).toBe(HOME);
+  });
+  it('keeps legacy position-58 completed pawns terminal', () => {
+    const token = { id: 'a-0', color: 'coral' as const, position: 58 };
+    expect(canMove(token, 1)).toBe(false);
+    expect(tokenCoordinate(token, 0)).toEqual([7,6]);
   });
 });

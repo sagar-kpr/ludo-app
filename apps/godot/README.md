@@ -4,6 +4,81 @@ Active direction: Godot 4.6.1 + GDScript for the Android/web game; Kotlin for
 Android-specific LiveKit integration. The previous Expo client is preserved in
 `apps/mobile`, not deleted or silently redeployed.
 
+## Premium restyle — section 1: board
+
+The board uses one editable Theme: [`resources/theme_tokens.tres`](resources/theme_tokens.tres).
+Open it in the Godot Inspector to edit red `#D93A2F`, green `#3F9F4F`, blue
+`#4FA3E8`, yellow `#F9D342`, grid/symbol ink and gradient strength. Under the
+Theme's `Board` styleboxes, edit `frame`/`rim` for exterior radii/borders/shadows,
+`yard_floor` for white-yard radii/shadows and `yard_inset` for inset shading.
+Style dimensions are in artwork pixels (64 pixels per board cell).
+Restart the scene after editing; artwork and the shared palette are cached.
+Pawn step shadows use the same player palette. Each departure/landing leaves a
+soft colored mark that holds for 0.35 seconds and fades over 1.10 seconds.
+Tune `step_shadow_opacity`, `step_shadow_hold` and `step_shadow_fade` in the same
+Theme resource. Sixteen reusable marks share one 128×128 radial texture;
+reduced motion suppresses trails. Movement timing and coordinates are unchanged.
+Every standing pawn also keeps a permanent colored shadow until its next hop.
+The permanent stamp stays on the departure cell during a hop and transfers on
+landing. It shares the trail texture, draws above the board, and uses the Theme's
+`pawn_shadow_opacity` setting. Shared cells fan each color's pawn/shadow anchors
+slightly apart so individual marks remain visible; reduced motion keeps these
+stationary shadows.
+
+Client presentation now queues focus/reconnection snapshots behind pending dice
+and pawn animations. A recovery snapshot cannot discard `TOKEN_MOVED` while the
+active player's dice is rolling. Visible per-pawn progress also lets a missing
+move event recover its intermediate hops without replaying completed movement.
+These changes affect the Godot display/queue; server messages and rules are
+unchanged. Refresh both clients after rebuilding the web export.
+
+Offline actor/observer regression check:
+
+```bash
+.tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/presentation.gd
+```
+
+Shadow/queue-update files: `scripts/board.gd`, `pawn.gd`, `design.gd`, `main.gd`,
+`theme_tokens.gd`, `resources/theme_tokens.tres`, `tests/board_visuals.gd`,
+`tests/presentation.gd` and its `.uid` sidecar, plus this README.
+
+`scripts/board_surface.gd` draws StyleBoxFlat frames and white yards,
+GradientTexture2D yard fills, thin grid lines, safe stars at the existing safe
+coordinates, inward home-path arrows and vertex-gradient center triangles.
+StyleBoxFlat does not offer gradient fills or inner shadows: gradient textures
+and a layered translucent inset border provide those effects on both targets.
+The artwork is rendered once in a 1024×1024 SubViewport and applied to one unlit
+plane under the existing pawns. Four 128×128 procedural gradients are reused.
+There are no new downloaded textures, custom shaders or per-frame art nodes.
+The cache is a runtime render texture, so ETC2/ASTC asset compression does not
+apply to it (approximately 4 MiB for the RGBA color attachment).
+
+This section changes board artwork and the shared player-color palette only.
+The current token models, dice, cards, screen layout, background, rules, turn
+timing and room/network implementation remain in place. Existing dock markers
+remain until section 2 adds the glossy tokens and proper slots. Compatibility
+rendering and `canvas_items`/`expand` are already configured in `project.godot`.
+
+Focused offline checks (art/pawn alignment, home lanes and selectable pins):
+
+```bash
+.tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/board_visuals.gd
+```
+
+Run this from the repository root. The original integration suite's board
+assertions now check the cached surface instead of removed individual floor
+meshes. That suite also has unrelated baseline failures (including overshoot,
+old pawn/card expectations and an invalid ShaderMaterial `albedo_color` read);
+those failures are outside this visual section and have not been repaired.
+Android hardware and mobile Safari performance require device verification;
+this section does not certify the 60 FPS target.
+
+Changed sources: `scripts/board.gd`, `scripts/board_surface.gd`,
+`scripts/design.gd`, `scripts/theme_tokens.gd`, `resources/theme_tokens.tres`,
+`tests/board_visuals.gd`, `tests/check.gd`, this README, and Godot-generated `.uid`
+sidecars for the three new scripts. The board is built dynamically; no `.tscn`
+change is needed. No deployment is included.
+
 ## Implemented migration slice
 
 - Actual 3D geometry: raised board/frame, rounded cell tiles and home trays,
@@ -29,10 +104,11 @@ Android-specific LiveKit integration. The previous Expo client is preserved in
   Reduced motion keeps the static ring and removes the loop. A gold dice instruction
   chip appears beneath the board. Safe stars are slate on cream and white on color.
 - Card borders/glows follow the player's color; the active avatar has a shrinking
-  gold ring and countdown. The server publishes real turn deadlines (default 15 s,
-  configurable with `TURN_TIMEOUT_MS`, 1–120 s), advances expired turns and rejects
-  stale actions. Moving selection uses the remaining turn time; new/extra turns
-  start after the animation lock. Older deployed servers without this metadata
+  gold ring and countdown. The server gives separate 30-second roll and move
+  clocks (configurable with `TURN_TIMEOUT_MS`, 1–120 s). An expired roll clock
+  rolls automatically; an expired move clock chooses a random legal pawn.
+  Blocked rolls pass immediately. Each new phase/bonus turn gets a full clock
+  starting after the animation lock. Older deployed servers without this metadata
   show no countdown. Restart/redeploy the server as well as rebuilding the client.
 - Full-pin selection includes animated heads, centers and feet. Per-step colored
   trails fade away automatically; reduced motion suppresses them. Shared squares
@@ -52,7 +128,8 @@ Android-specific LiveKit integration. The previous Expo client is preserved in
   matching-color rings for local legal moves, duplicate-tap lock and reduced-motion setting.
 - Fixed game composition rather than scrolling during play; setup screens scroll.
 - Four-second profile chat previews, fade in/out and latest-message replacement;
-  they never cover the board or active dice. Full text remains in the chat dialog.
+  compact navy captions face away from the board (with an edge fallback) and keep
+  the sender identity and dice visible. Full text remains in the chat dialog.
   Chat receipt bypasses gameplay animation waits.
 - Original cached PCM dice, walking, capture and incoming-chat cues. Local-player
   roll/step and involved-player capture vibration, separate persisted sound and
@@ -72,6 +149,93 @@ The engine's wire colors remain `coral/sun/mint/violet`, mapped visually to
 red/green/yellow/blue. This is an adapter, not a new second rules engine.
 The server's existing 9-character `XXXX-XXXX` codes are preserved; this differs
 from the document's 6-character input. Changing that contract is a separate step.
+
+Pawn completion now happens immediately on the colored center triangle:
+positions 1–51 are the shared track, 52–56 the home lane, and `HOME = 57` the
+terminal triangle. Finished pins stay there, arranged in four small slots with
+gold checks. They never return to the yard or become selectable on another roll.
+Legacy finished values of 58 also display as completed. The shared engine and
+Godot adapter use the same endpoint. Finishing now requires an exact roll;
+finishing bonuses, captures and ranked turn order keep their existing behavior.
+These are requested gameplay changes following the visual-only board work above.
+Rebuild the client and restart the server with the updated engine together;
+existing rooms are cleared by a local watcher restart. Hosted servers need the
+same engine update before this behavior can be used there.
+Completion-correction files: `packages/game-engine/src/types.ts`, `board.ts`,
+`index.ts`, `index.test.ts`, `rankings.test.ts`, `motion.test.ts`;
+`apps/godot/scripts/board_math.gd`, `board.gd`, `pawn.gd`, `main.gd`;
+`apps/godot/tests/board_visuals.gd`, `check.gd`; `scripts/godot-contract.test.ts`,
+`test-godot-browser.mjs`; and this README.
+
+The screenshot regression fixes keep red/green at the top left/right and
+blue/yellow at the bottom left/right, with expanding row spacers that preserve
+corners even when the opposite seat is absent. Finished cards show a persistent
+gold “Winner · 1st”/placing label and no active dice or timer. The server skips
+players with four terminal pawns even if a recovered room lacks their finish
+entry; existing recorded ranks retain their order. Missing historical ranks
+cannot reveal the original finish sequence and are appended in seat order.
+When only base and completed pawns remain, rolls 1–5 pass immediately; six
+still opens a base pawn. Shared grid strokes now draw after all cell fills,
+with darker ink on every lane, including green. Chat networking is unchanged.
+
+Files for these screenshot fixes: `scripts/main.gd`, `player_card.gd`,
+`chat_bubbles.gd`, `board_surface.gd`, `theme_tokens.gd`,
+`tests/ui_regressions.gd` (and generated UID); repository-root
+`packages/game-engine/src/index.ts`, `rankings.test.ts`; and this README.
+Run the focused UI checks with:
+
+```bash
+.tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/ui_regressions.gd
+```
+
+Finish/movement rule follow-up: a pawn may advance only when the full roll
+fits before or exactly on `HOME`; an oversized roll cannot highlight, tap, or
+move that pawn. The dice-animation cue also filters by the actual rolled value;
+pawns no longer show selection highlights before a roll. A friendly pawn blocks
+landing on its square unless the destination is a star. This applies to the
+shared track and private home lane; passing over a friendly pawn is allowed.
+Finished pawns keep their separate center docks. Server validation, automatic
+moves, timeout choices, and Godot/Vite/Expo selection use these same checks.
+If every pawn is blocked, the server passes immediately.
+Automatic movement now covers six as well as 1–5 when there is exactly one
+legal choice (including the last remaining base pawn). Finishing the first,
+second or third pawn grants the same player another roll; finishing the fourth
+records their place and advances to an unfinished player. Automatic and manual
+moves share this bonus rule. Both clients wait for landing before enabling the
+next roll.
+
+Follow-up files: repository-root `packages/game-engine/src/index.ts`,
+`index.test.ts`, `finish-rules.test.ts`; Godot `scripts/board_math.gd`, `board.gd`,
+`tests/finish_rules.gd` (and generated UID), `tests/presentation.gd`; this README.
+The finish tests exercise every color, distances 1–6, all six dice outcomes,
+first/second/third-pawn bonuses, fourth-pawn retirement, six-only base entry,
+and owner/observer highlights and presentation. Run them with:
+
+```bash
+npx vitest run packages/game-engine/src/finish-rules.test.ts packages/game-engine/src/occupancy.test.ts
+.tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/finish_rules.gd
+.tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/presentation.gd
+```
+
+Timeout follow-up: both roll and move-selection phases default to 30 seconds.
+The authoritative server rolls on roll timeout, resets the selection deadline
+after the dice animation, and randomly chooses from legal pawns on move timeout.
+Completed pawns, opponents, overshoots and base pawns without six are excluded.
+No legal choices pass without movement. The previous immediate single-choice
+auto-move remains enabled; multiple choices receive the full selection clock.
+Normal capture/finish/six bonuses and completed-player retirement also apply to
+timeout moves. Each timeout uses standard dice/move broadcasts, so Android and
+web clients follow the same animation queue. Late inputs cannot apply twice.
+`TURN_TIMEOUT_MS` still allows accelerated test clocks; unset it or use `30000`
+for the requested 30/30 behavior.
+
+Timeout files: repository-root `.env.example`, `apps/game-server/src/index.ts`,
+`turn-clock.ts`, `turn-clock.test.ts`, `turn-clock.integration.test.ts`,
+`rooms.test.ts`, `packages/game-engine/src/rankings.test.ts`; Godot
+`scripts/main.gd`, `player_card.gd`, `tests/check.gd`, `ui_regressions.gd`,
+`presentation.gd`; and this README. Live WebSocket tests use a child-only dice
+preload and 1-second clocks to verify automatic roll/move, both-client event and
+deadline equality, animation locks, manual-roll timer reset and blocked rolls.
 
 ## Open and run
 
@@ -108,7 +272,8 @@ npm run godot -- --server=ws://127.0.0.1:8787
 
 Run the second command twice to open two client windows. Create in one, join the
 code in the other and start as host. Use a six to open a pawn. Server automatic
-movement remains enabled only when exactly one legal pawn exists on rolls 1–5.
+movement runs whenever exactly one legal pawn exists, including a roll of six.
+Base entry still needs six, and two or more legal pawns still require a choice.
 
 If your Godot is elsewhere:
 
@@ -209,3 +374,60 @@ refresh/disconnect, and does not implement every regional Ludo rule variant.
 The UI says so rather than showing a fake successful reconnection. The current
 Supabase adapter is partial; this migration makes no claim that Firebase auth,
 Redis or durable PostgreSQL match history have been implemented.
+
+### Leaving a match
+
+Each player can use the exit icon beside chat and camera on their own profile.
+The confirmation offers Stay or Yes, leave. The server removes their pawns and
+future turns immediately; clients present a shadow dissolve and rising smoke,
+then keep a large LEFT THE GAME label over the empty home corner. Reduced motion
+skips the effect. When only one player remains, the client announces the winner
+for four seconds and returns them to home, releasing their room membership.
+
+Run `npm run godot:test:leaving` for the three-client server/UI regression test.
+The same `res://tests/leaving.gd` test can run with a graphics renderer to save
+smoke and departure screenshots under `test-results/`.
+
+### Emoji picker
+
+The emoji button opens a compact navy picker anchored eight pixels below that
+player's icon. It follows the icon on resize, clamps horizontally to the screen,
+and flips above only when there is no room below for the header and a row.
+The four-column grid scrolls when vertical space is limited; all 24 stickers and emotions,
+recipient selection, outside-click dismissal and the close button remain available.
+
+Check placement at each corner and multiple mobile/desktop sizes with:
+
+```bash
+.tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/emoji_picker.gd
+```
+
+Emotion reactions appear first: Like (thumbs up), Happy, Angry, Sad, Cry, Wow,
+Wink, and Thinking. They preview their expression in the picker and animate on
+the recipient's profile after delivery (tears, steam, winks, smiles, and hand
+gestures). Reduced motion shows still artwork. The server validates all 24 IDs
+against `packages/shared/src/stickers.ts`; a contract test keeps the GDScript
+catalog aligned. `emoji_picker.gd` checks effect animation, reduced motion and
+cleanup, while the WebSocket suite verifies every emotion reaches both players.
+
+### Five timeout chances
+
+Five dots beneath each avatar span the portrait width and use that player's
+board color. Filled dots show the remaining chances; used dots become hollow.
+Each missed roll or move-selection deadline costs one chance from the same
+per-player pool. Manual actions do not charge or refill it. A normal automatic
+single-choice move, or a pass with no legal move, does not cost a chance. A
+missed roll followed by its single-choice move costs one, rather than two.
+
+The server includes balances in match snapshots, so reconnecting preserves them.
+The fifth timeout action uses the last dot and completes normally. At zero dots,
+the player can still play manually. Only their next missed deadline removes them
+through the normal leave flow, without another automatic roll or move. Clients finish queued dice/movement, dissolve the pawns
+into smoke, mark the empty corner, and return the removed player home with an
+inactivity notice. The final remaining player wins. A fresh match restores five.
+
+`npm run godot:test:lives` runs two real Godot clients against a temporary server
+with a one-second clock and child-only deterministic dice. It checks every life
+count, smoke departure, winner handling, home navigation, and fresh-game reset.
+The WebSocket suite also checks shared roll/move accounting and the manual-roll
+single-choice exemption. UI layout checks cover dot alignment and player colors.

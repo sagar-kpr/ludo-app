@@ -1,5 +1,6 @@
 extends RefCounted
 
+const TOKENS = preload("res://resources/theme_tokens.tres")
 const CREAM = Color("080b18")
 const BEIGE = Color("20243d")
 const FOREST = Color("2f85c8")
@@ -8,8 +9,23 @@ const INK = Color("f5f6ff")
 const MUTED = Color("969ab7")
 const DIVIDER = Color("343851")
 # Wire identifiers are retained so the existing engine/server remain compatible.
-const COLORS = {"coral": Color("ed1c24"), "sun": Color("00a651"), "mint": Color("ffe32b"), "violet": Color("23afe5")}
+static var COLORS: Dictionary = TOKENS.player_colors()
 const COLOR_NAMES = {"coral": "Red", "sun": "Green", "mint": "Yellow", "violet": "Blue"}
+static var shadow_texture: GradientTexture2D
+
+static func pawn_shadow_texture() -> GradientTexture2D:
+	if shadow_texture == null:
+		var gradient := Gradient.new()
+		gradient.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+		gradient.colors = PackedColorArray([Color.WHITE, Color(0.85, 0.85, 0.85, 0.75), Color(0.75, 0.75, 0.75, 0.0)])
+		shadow_texture = GradientTexture2D.new()
+		shadow_texture.gradient = gradient
+		shadow_texture.width = 128
+		shadow_texture.height = 128
+		shadow_texture.fill = GradientTexture2D.FILL_RADIAL
+		shadow_texture.fill_from = Vector2(0.5, 0.5)
+		shadow_texture.fill_to = Vector2(0.5, 1.0)
+	return shadow_texture
 
 static func surface(color: Color = Color.WHITE, radius: int = 12, border: Color = DIVIDER) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
@@ -27,7 +43,7 @@ static func surface(color: Color = Color.WHITE, radius: int = 12, border: Color 
 	return style
 
 static func make_theme() -> Theme:
-	var theme := Theme.new()
+	var theme := TOKENS.duplicate(true) as Theme
 	theme.default_font_size = 15
 	var emphasis := FontVariation.new()
 	emphasis.base_font = ThemeDB.fallback_font

@@ -18,7 +18,7 @@ export function tokenCoordinate(token: Token, index: number): [number, number] {
     const bases = [[1,1],[1,10],[10,10],[10,1]];
     return [bases[color][0] + (index >= 2 ? 2 : 0) + 1, bases[color][1] + (index % 2 ? 2 : 0) + 1];
   }
-  if (token.position === HOME) return [7,7];
+  if (token.position >= HOME) return [[7,6],[6,7],[7,8],[8,7]][color] as [number, number];
   const track = trackIndex(token);
   if (track !== null) return TRACK[track];
   const lane = token.position - 51;

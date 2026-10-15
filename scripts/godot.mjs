@@ -26,6 +26,8 @@ else if (mode === 'check') {
   console.log(`Godot parsed ${files.length} scripts successfully.`);
   process.exit(0);
 }
+else if (mode === 'test:lives') args.push('--headless', '--script', 'res://tests/timeout_lives.gd');
+else if (mode === 'test:leaving') args.push('--headless', '--script', 'res://tests/leaving.gd');
 else if (mode === 'test') args.push('--headless', '--script', 'res://tests/check.gd');
 else if (mode === 'build:web') {
   mkdirSync(path.join(project, 'dist'), { recursive: true });

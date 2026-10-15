@@ -15,7 +15,7 @@ func show_message(card: Control, sender: String, message: String) -> void:
 		entries[id].panel.queue_free()
 	var bubble := PanelContainer.new()
 	bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := Design.surface(Color("f5f8ff"),12,card.avatar.accent.lightened(0.55))
+	var style := Design.surface(Color("10243d"),12,card.avatar.accent.lightened(0.55))
 	style.content_margin_left = 9
 	style.content_margin_right = 9
 	style.content_margin_top = 5
@@ -25,11 +25,11 @@ func show_message(card: Control, sender: String, message: String) -> void:
 	var text := Label.new()
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	text.max_lines_visible = 3
+	text.max_lines_visible = 2
 	text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	text.add_theme_font_size_override("font_size",12)
-	text.add_theme_color_override("font_color",Design.INK)
-	text.text = sender+":\n"+message.left(160)
+	text.add_theme_color_override("font_color",Color.WHITE)
+	text.text = sender+": "+message.left(160)
 	bubble.add_child(text)
 	var tween := create_tween()
 	entries[id] = {"panel":bubble,"card":card,"tween":tween}
@@ -49,13 +49,17 @@ func show_message(card: Control, sender: String, message: String) -> void:
 func position_bubble(entry: Dictionary) -> void:
 	var card: Control = entry.card
 	var panel: Control = entry.panel
-	# Inside the sender's identity area: never covers board, dice or footer controls.
-	panel.position = card.panel.global_position-global_position
-	var available: float = card.size.x-(80 if card.roll.visible else 0)
-	var inset := 38.0 if available >= 130 else 0.0
-	panel.position.x += inset
-	# Leave the bottom countdown/status strip readable while a preview is showing.
-	panel.size = Vector2(maxf(80,available-inset),maxf(48,card.panel.size.y))
+	# Face captions away from the table: above top cards, below bottom cards.
+	# Fall back below top-edge cards and clamp to the browser/safe viewport.
+	var width := minf(card.panel.size.x, 200.0)
+	panel.size = Vector2(maxf(80, width), 0)
+	var at: Vector2 = card.panel.global_position - global_position
+	at.y -= panel.size.y + 6
+	if at.y < 4 or card.global_position.y-global_position.y > size.y * 0.5:
+		at.y = card.global_position.y - global_position.y + card.size.y + 4
+	at.x = clampf(at.x, 4, maxf(4, size.x-panel.size.x-4))
+	at.y = clampf(at.y, 4, maxf(4, size.y-panel.size.y-4))
+	panel.position = at
 	panel.visible = card.is_visible_in_tree()
 
 func _process(_delta: float) -> void:

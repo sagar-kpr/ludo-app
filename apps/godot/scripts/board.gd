@@ -7,21 +7,27 @@ const Design = preload("res://scripts/design.gd")
 const BoardMath = preload("res://scripts/board_math.gd")
 const Pawn = preload("res://scripts/pawn.gd")
 const Geometry = preload("res://scripts/geometry.gd")
-const BOARD_COLORS = Design.COLORS
+const BoardSurface = preload("res://scripts/board_surface.gd")
+static var BOARD_COLORS: Dictionary = Design.COLORS
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
 var pawns: Dictionary = {}
 var tokens: Dictionary = {}
+var display_positions: Dictionary = {}
 var enabled := false
 var reduced_motion := false
-var mats: Dictionary = {}
-var board_shader: Shader
+var artwork_viewport: SubViewport
+var artwork: Control
+var board_plane: MeshInstance3D
 var stack_labels: Array[Label3D] = []
 var rank_labels: Dictionary = {}
+var departure_labels: Dictionary = {}
 var trails: Array[MeshInstance3D] = []
-var trail_shader: Shader
-var home_docks: Dictionary = {}
+const TRAIL_POOL_SIZE := 16
+var trail_pool: Array[MeshInstance3D] = []
+var trail_fades: Dictionary = {}
+var trail_texture: GradientTexture2D
 
 func _ready() -> void:
 	stretch = true
@@ -66,6 +72,7 @@ func _ready() -> void:
 	camera.current = true
 	resized.connect(_fit_camera)
 	make_board()
+	make_trail_pool()
 	_fit_camera()
 
 func _fit_camera() -> void:
@@ -89,152 +96,39 @@ func _fit_camera() -> void:
 		camera.keep_aspect = Camera3D.KEEP_WIDTH
 		camera.size = maxf(16.3,(top-bottom+0.25)*size.x/maxf(size.y,1.0))
 
-func mat(color: Color, wood: bool = false) -> ShaderMaterial:
-	# Printed colors stay saturated and the white cells stay white, independent
-	# of studio lighting. Separate contact shadows ground the lit 3D tokens.
-	if not board_shader:
-		board_shader = Shader.new()
-		board_shader.code = """
-		shader_type spatial;
-		render_mode unshaded;
-		uniform vec4 tint : source_color;
-		void fragment() {
-			ALBEDO = tint.rgb;
-		}
-		"""
-	var key := color.to_html()+str(wood)
-	if not mats.has(key):
-		var material := ShaderMaterial.new()
-		material.shader = board_shader
-		material.set_shader_parameter("tint",color)
-		mats[key] = material
-	return mats[key]
-
-func flat_rect(at: Vector3, dimensions: Vector2, color: Color) -> MeshInstance3D:
-	var mesh := PlaneMesh.new()
-	mesh.size = dimensions
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	instance.material_override = mat(color)
-	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	instance.position = at
-	world.add_child(instance)
-	return instance
-
-func disc(at: Vector3, radius: float, color: Color) -> MeshInstance3D:
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = radius
-	mesh.bottom_radius = radius
-	mesh.height = 0.001
-	mesh.radial_segments = 24
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	instance.material_override = mat(color)
-	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	instance.position = at
-	world.add_child(instance)
-	return instance
-
-func triangle(points: Array, color: Color) -> void:
-	var mesh := ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	mesh.surface_set_normal(Vector3.UP)
-	var ordered := points.duplicate()
-	if (points[1]-points[0]).cross(points[2]-points[0]).y > 0:
-		ordered.reverse()
-	for point in ordered:
-		mesh.surface_add_vertex(point)
-	mesh.surface_end()
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	instance.material_override = mat(color)
-	world.add_child(instance)
-
-func star(at: Vector3, colored: bool = false) -> void:
-	# Hollow safe-cell symbol with a thin printed outline.
-	for index in range(10):
-		var a := index * TAU / 10 - PI / 2
-		var b := (index + 1) * TAU / 10 - PI / 2
-		var r1 := 0.40 if index % 2 == 0 else 0.19
-		var r2 := 0.19 if index % 2 == 0 else 0.40
-		var outer_a := at+Vector3(cos(a)*r1,0,sin(a)*r1)
-		var outer_b := at+Vector3(cos(b)*r2,0,sin(b)*r2)
-		var inner_a := at+Vector3(cos(a)*(r1-0.035),0,sin(a)*(r1-0.035))
-		var inner_b := at+Vector3(cos(b)*(r2-0.035),0,sin(b)*(r2-0.035))
-		var ink := Color("65766e") if colored else Color("78827e")
-		triangle([outer_a,outer_b,inner_a],ink)
-		triangle([inner_a,outer_b,inner_b],ink)
-
-func stroke(from: Vector3, to: Vector3, width: float, color: Color) -> void:
-	var direction := (to-from).normalized()
-	var side := Vector3(-direction.z,0,direction.x)*width*0.5
-	triangle([from-side,to-side,to+side],color)
-	triangle([from-side,to+side,from+side],color)
-
-func arrow(at: Vector3, direction: Vector3, color: Color) -> void:
-	var side := Vector3(-direction.z,0,direction.x)
-	var tip := at+direction*0.29
-	stroke(at-direction*0.29,tip,0.045,color)
-	stroke(at+side*0.18,tip,0.045,color)
-	stroke(at-side*0.18,tip,0.045,color)
-
 func make_board() -> void:
-	flat_rect(Vector3(0,0.18,0),Vector2(15.08,15.08),Color("687a7b"))
-	flat_rect(Vector3(0,0.19,0),Vector2(15.0,15.0),Color("9aa6a2"))
-	var corners := [Vector2i(0,0), Vector2i(0,9), Vector2i(9,9), Vector2i(9,0)]
-	for seat in range(4):
-		var color: Color = BOARD_COLORS[BoardMath.COLORS[seat]]
-		var corner: Vector2i = corners[seat]
-		var center := Vector3(corner.y - 4.5, 0, corner.x - 4.5)
-		flat_rect(center+Vector3(0,0.20,0),Vector2(5.98,5.98),Color("d5bc17") if seat == 2 else color)
-		# A printed outline and white inset, not a recessed tray or raised frame.
-		flat_rect(center+Vector3(0,0.202,0),Vector2(4.06,4.06),color.darkened(0.20)).name = "HomeRim%d" % seat
-		flat_rect(center+Vector3(0,0.204,0),Vector2(4.0,4.0),Color.WHITE).name = "HomeFloor%d" % seat
-		for index in range(4):
-			var dock := BoardMath.world(BoardMath.COLORS[seat], 0, index)
-			dock.y = 0.206
-			home_docks[str(BoardMath.COLORS[seat])+"-"+str(index)] = [disc(dock,0.47,color.lightened(0.18)),disc(dock+Vector3(0,0.002,0),0.44,color)]
-	for row in range(15):
-		for col in range(15):
-			if (row < 6 or row > 8) and (col < 6 or col > 8):
-				continue
-			if row >= 6 and row <= 8 and col >= 6 and col <= 8:
-				continue
-			var color := Color.WHITE
-			if row == 7 and col >= 1 and col <= 5:
-				color = BOARD_COLORS.coral
-			elif col == 7 and row >= 1 and row <= 5:
-				color = BOARD_COLORS.sun
-			elif row == 7 and col >= 9 and col <= 13:
-				color = BOARD_COLORS.mint
-			elif col == 7 and row >= 9 and row <= 13:
-				color = BOARD_COLORS.violet
-			var coord := [row,col]
-			for seat in range(4):
-				if coord == BoardMath.TRACK[seat * 13]:
-					color = BOARD_COLORS[BoardMath.COLORS[seat]]
-			var at := Vector3(col-7,0.20,row-7)
-			flat_rect(at,Vector2(0.978,0.978),color)
-			if BoardMath.TRACK.find(coord) in BoardMath.SAFE:
-				star(at+Vector3(0,0.002,0),color != Color.WHITE)
-	var middle := Vector3(0,0.20,0)
-	triangle([Vector3(-1.5,0.20,-1.5),Vector3(-1.5,0.20,1.5),middle],BOARD_COLORS.coral)
-	triangle([Vector3(-1.5,0.20,-1.5),middle,Vector3(1.5,0.20,-1.5)],BOARD_COLORS.sun)
-	triangle([Vector3(1.5,0.20,-1.5),middle,Vector3(1.5,0.20,1.5)],BOARD_COLORS.mint)
-	triangle([Vector3(-1.5,0.20,1.5),Vector3(1.5,0.20,1.5),middle],BOARD_COLORS.violet)
-	for x in [-1.5,1.5]:
-		for z in [-1.5,1.5]:
-			stroke(Vector3(0,0.202,0),Vector3(x,0.202,z),0.022,Color("78827e"))
-	arrow(Vector3(-7,0.202,0),Vector3.LEFT,BOARD_COLORS.coral)
-	arrow(Vector3(0,0.202,-7),Vector3.FORWARD,BOARD_COLORS.sun)
-	arrow(Vector3(7,0.202,0),Vector3.RIGHT,BOARD_COLORS.mint)
-	arrow(Vector3(0,0.202,7),Vector3.BACK,BOARD_COLORS.violet)
+	# Render Theme/StyleBoxFlat/GradientTexture2D artwork once. A single unlit
+	# plane preserves the established 3D pawn coordinates and input projection.
+	artwork_viewport = SubViewport.new()
+	artwork_viewport.name = "BoardArtworkCache"
+	artwork_viewport.size = Vector2i(BoardSurface.RESOLUTION, BoardSurface.RESOLUTION)
+	artwork_viewport.disable_3d = true
+	artwork_viewport.gui_disable_input = true
+	artwork_viewport.transparent_bg = true
+	artwork_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	world.add_child(artwork_viewport)
+	artwork = BoardSurface.new()
+	artwork.name = "PremiumBoardSurface"
+	artwork_viewport.add_child(artwork)
+	var mesh := PlaneMesh.new()
+	# 1024px / 64px per cell = 16 world units including the shadow gutter.
+	mesh.size = Vector2.ONE * float(BoardSurface.RESOLUTION) / BoardSurface.CELL
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_texture = artwork_viewport.get_texture()
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	board_plane = MeshInstance3D.new()
+	board_plane.name = "PremiumBoard"
+	board_plane.mesh = mesh
+	board_plane.material_override = material
+	board_plane.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	board_plane.position = Vector3(0, 0.20, 0)
+	world.add_child(board_plane)
 
 func apply_state(state: Dictionary, self_id: String, highlight_color: String = "") -> void:
-	for dock in home_docks.values():
-		for mesh in dock:
-			mesh.visible = true
 	var present: Dictionary = {}
+	var dice_value := int(state.dice) if state.get("dice") != null else 0
 	for token in state.get("tokens", []):
 		present[str(token.id)] = true
 	for id in pawns.keys():
@@ -242,6 +136,7 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 			pawns[id].queue_free()
 			pawns.erase(id)
 			tokens.erase(id)
+			display_positions.erase(id)
 	var active_color := ""
 	for player in state.get("players", []):
 		if player.id == state.get("currentPlayer"):
@@ -253,19 +148,42 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 			var pawn := Pawn.new()
 			world.add_child(pawn)
 			pawn.configure(id, BOARD_COLORS[token.color])
+			pawn.finish_badge = make_completion_check()
 			pawns[id] = pawn
 		var pawn: Node3D = pawns[id]
 		pawn.reduced_motion = reduced_motion
 		pawn.position = BoardMath.world(str(token.color), int(token.position), index)
-		pawn.scale = Vector3.ONE
-		# Finished pins return to their own docks beneath the placement badge.
-		if int(token.position) == 58:
-			pawn.position = BoardMath.world(str(token.color),0,index)
-		pawn.legal_move = int(token.position) < 58 and state.get("currentPlayer") == self_id and state.get("phase") == "moving" and token.color == active_color and BoardMath.legal(token, int(state.get("dice", 0)))
-		pawn.highlight = int(token.position) < 58 and state.get("phase") in ["rolling","moving"] and token.color == (highlight_color if not highlight_color.is_empty() else active_color)
+		var completed := int(token.position) >= BoardMath.HOME
+		pawn.scale = Vector3.ONE * (0.64 if completed else 1.0)
+		pawn.set_completed(completed)
+		if completed:
+			place_completion_check(pawn)
+		pawn.legal_move = not completed and state.get("currentPlayer") == self_id and state.get("phase") == "moving" and token.color == active_color and BoardMath.legal(token, dice_value, state.get("tokens",[]))
+		var fits_roll: bool = state.get("phase") == "moving" and BoardMath.legal(token, dice_value, state.get("tokens",[]))
+		pawn.highlight = not completed and fits_roll and state.get("phase") in ["rolling","moving"] and token.color == (highlight_color if not highlight_color.is_empty() else active_color)
 		tokens[id] = token.duplicate()
+		display_positions[id] = int(token.position)
 	layout_stacks()
 	show_ranks(state)
+	show_departed(state)
+
+func make_completion_check() -> Control:
+	# Flat canvas overlay avoids 3D alpha sorting and font/glyph dependencies.
+	var badge := Control.new()
+	badge.name = "CompletedPawnCheck"
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.size = Vector2(16, 16)
+	badge.draw.connect(func():
+		badge.draw_circle(Vector2(8, 8), 7, Design.GOLD)
+		badge.draw_circle(Vector2(8, 8), 6, Color("10213c"))
+		badge.draw_polyline(PackedVector2Array([Vector2(4, 8), Vector2(7, 11), Vector2(12, 5)]), Design.GOLD, 2.0, true)
+	)
+	viewport.add_child(badge)
+	badge.hide()
+	return badge
+
+func place_completion_check(pawn: Node3D) -> void:
+	pawn.finish_badge.position = camera.unproject_position(pawn.visual.to_global(Vector3(0, 1.46, 0.54))) - pawn.finish_badge.size * 0.5
 
 func make_badge(text: String, color: Color, at: Vector3) -> Label3D:
 	var badge := Label3D.new()
@@ -288,15 +206,16 @@ func layout_stacks(moving_id: String = "") -> void:
 	var groups: Dictionary = {}
 	for id in tokens:
 		var token: Dictionary = tokens[id]
+		var displayed := int(display_positions.get(id, token.position))
 		if id == moving_id:
 			continue
 		if not moving_id.is_empty():
 			var index := int(str(id).get_slice("-",str(id).get_slice_count("-")-1))
-			pawns[id].position = BoardMath.world(str(token.color),0 if int(token.position) == 58 else int(token.position),index)
-			pawns[id].scale = Vector3.ONE
-		if int(token.position) <= 0 or int(token.position) >= 58:
+			pawns[id].position = BoardMath.world(str(token.color),displayed,index)
+			pawns[id].scale = Vector3.ONE * (0.64 if displayed >= BoardMath.HOME else 1.0)
+		if displayed <= 0 or displayed >= BoardMath.HOME:
 			continue
-		var cell := BoardMath.coordinate(str(token.color),int(token.position),0)
+		var cell := BoardMath.coordinate(str(token.color),displayed,0)
 		var key := str(cell)
 		if not groups.has(key):
 			groups[key] = []
@@ -306,7 +225,7 @@ func layout_stacks(moving_id: String = "") -> void:
 			continue
 		ids.sort()
 		var color_groups: Dictionary = {}
-		var center: Vector3 = pawns[ids[0]].position
+		var center := BoardMath.world(str(tokens[ids[0]].color), int(display_positions[ids[0]]), 0)
 		for id in ids:
 			var color: String = tokens[id].color
 			if not color_groups.has(color):
@@ -321,7 +240,8 @@ func layout_stacks(moving_id: String = "") -> void:
 				offset = Vector3((i%2-0.5)*0.55,0,(floor(float(i)/2)-0.5)*0.55)
 			for j in range(members.size()):
 				var pawn: Node3D = pawns[members[j]]
-				pawn.position = center+offset+Vector3(j*0.07,0,-j*0.07)
+				var fan := (j - (members.size() - 1) * 0.5) * 0.13
+				pawn.position = center+offset+Vector3(fan,0,-fan)
 				pawn.scale = Vector3.ONE*(0.80 if colors.size() == 1 else 0.64)
 			var representative: Node3D = pawns[members[0]]
 			var badge := make_badge(str(members.size()),Color("142a46"),representative.visual.to_global(Vector3(0,1.05,0.51)))
@@ -336,6 +256,9 @@ func _process(_delta: float) -> void:
 		var id: String = badge.get_meta("pin","")
 		if pawns.has(id):
 			badge.position = pawns[id].visual.to_global(Vector3(0,1.05,0.51))
+	for pawn in pawns.values():
+		if pawn.completed and is_instance_valid(pawn.finish_badge):
+			place_completion_check(pawn)
 
 func show_ranks(state: Dictionary) -> void:
 	var order: Array = state.get("finishOrder",[])
@@ -361,35 +284,68 @@ func show_ranks(state: Dictionary) -> void:
 			tween.parallel().tween_property(badge,"rotation:y",TAU*2.0,0.65).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			tween.tween_property(badge,"scale",Vector3.ONE,0.20)
 
+func make_trail_pool() -> void:
+	# One soft radial texture and a bounded pool: no shaders or per-step nodes.
+	trail_texture = Design.pawn_shadow_texture()
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(0.85,0.85)
+	var pool := Node3D.new()
+	pool.name = "StepShadowPool"
+	world.add_child(pool)
+	for index in range(TRAIL_POOL_SIZE):
+		var mark := MeshInstance3D.new()
+		mark.mesh = mesh
+		var finish := StandardMaterial3D.new()
+		finish.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		finish.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		finish.cull_mode = BaseMaterial3D.CULL_DISABLED
+		finish.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		# The board's transparent gutter makes its entire plane alpha-sorted.
+		# Draw marks afterward so distant track cells cannot hide their decals.
+		finish.render_priority = 1
+		finish.albedo_texture = trail_texture
+		mark.material_override = finish
+		mark.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mark.rotation.x = -PI / 2
+		mark.hide()
+		pool.add_child(mark)
+		trail_pool.append(mark)
+
 func leave_trail(at: Vector3, color: Color) -> void:
 	if reduced_motion:
 		return
-	var mark := MeshInstance3D.new()
-	var mesh := QuadMesh.new()
-	mesh.size = Vector2(0.85,0.85)
-	mark.mesh = mesh
-	if not trail_shader:
-		trail_shader = Shader.new()
-		trail_shader.code = "shader_type spatial; render_mode unshaded,cull_disabled,depth_draw_never; uniform vec4 tint : source_color; uniform float fade = 1.0; void fragment(){float r=length((UV-vec2(0.5))*2.0); ALBEDO=tint.rgb; ALPHA=(1.0-smoothstep(0.1,1.0,r))*0.42*fade;}"
-	var finish := ShaderMaterial.new()
-	finish.shader = trail_shader
-	finish.set_shader_parameter("tint",color.lightened(0.30))
-	mark.material_override = finish
-	mark.position = at+Vector3(0,0.025,0)
-	mark.rotation.x = -PI/2
-	world.add_child(mark)
+	var mark: MeshInstance3D = null
+	for available in trail_pool:
+		if not available.visible:
+			mark = available
+			break
+	if mark == null:
+		mark = trails[0]
+		clear_trail(mark)
+	var finish := mark.material_override as StandardMaterial3D
+	# Preserve the pawn hue rather than washing it out with white.
+	finish.albedo_color = Color(color, Design.TOKENS.step_shadow_opacity)
+	mark.position = Vector3(at.x, 0.224, at.z)
+	mark.show()
 	trails.append(mark)
 	var tween := create_tween()
-	tween.tween_method(func(value: float): finish.set_shader_parameter("fade",value),1.0,0.0,1.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tween.parallel().tween_property(mark,"scale",Vector3(1.18,1.18,1.18),1.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tween.tween_callback(func():
-		trails.erase(mark)
-		mark.queue_free()
-	)
+	trail_fades[mark] = tween
+	tween.tween_interval(Design.TOKENS.step_shadow_hold)
+	tween.tween_property(finish, "albedo_color:a", 0.0, Design.TOKENS.step_shadow_fade).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_callback(func(): clear_trail(mark))
 
-func highlight_player(color: String) -> void:
+func clear_trail(mark: MeshInstance3D) -> void:
+	if trail_fades.has(mark):
+		var tween: Tween = trail_fades[mark]
+		if tween.is_valid():
+			tween.kill()
+		trail_fades.erase(mark)
+	trails.erase(mark)
+	mark.hide()
+
+func highlight_player(color: String, dice_value: int) -> void:
 	for id in pawns:
-		pawns[id].highlight = tokens[id].color == color and int(tokens[id].position) < 58
+		pawns[id].highlight = tokens[id].color == color and BoardMath.legal(tokens[id],dice_value,tokens.values())
 
 func animate_move(event: Dictionary) -> void:
 	var id := str(event.get("tokenId", ""))
@@ -399,25 +355,56 @@ func animate_move(event: Dictionary) -> void:
 	var index := int(id.get_slice("-", id.get_slice_count("-") - 1))
 	var start := int(event.get("from", token.position))
 	var finish := int(event.get("to", token.position))
-	var steps := 1 if start == 0 else finish - start
+	if int(display_positions.get(id, start)) == finish:
+		return
+	var steps := 1 if start == 0 else maxi(0, mini(finish, BoardMath.HOME) - mini(start, BoardMath.HOME))
 	var duration := float(event.get("durationMs", steps*240)) / 1000.0
 	layout_stacks(id)
 	pawns[id].scale = Vector3.ONE
 	leave_trail(pawns[id].position,BOARD_COLORS[token.color])
 	for step in range(steps):
 		var landing := finish if start == 0 else start + step + 1
-		# Completed pawns land in their own dock instead of briefly moving to the
-		# center, where they can be hidden by the HUD during the state update.
-		var destination := BoardMath.world(str(token.color),0,index) if landing >= 58 else BoardMath.world(str(token.color),landing,index)
+		var destination := BoardMath.world(str(token.color), landing, index)
 		await pawns[id].hop_to(destination, maxf(0.24,duration / maxf(steps, 1)), reduced_motion)
 		leave_trail(destination,BOARD_COLORS[token.color])
+		display_positions[id] = landing
 		step_landed.emit(id)
+	display_positions[id] = finish
+	if finish >= BoardMath.HOME:
+		pawns[id].scale = Vector3.ONE * 0.64
+		pawns[id].set_completed(true)
+		place_completion_check(pawns[id])
 	for captured_id in event.get("captured", []):
 		if pawns.has(captured_id):
 			token_captured.emit(id,str(captured_id))
 			var captured: Dictionary = tokens[captured_id]
 			var captured_index := int(str(captured_id).get_slice("-", str(captured_id).get_slice_count("-") - 1))
 			await pawns[captured_id].hop_to(BoardMath.world(str(captured.color), 0, captured_index), 0.20, reduced_motion)
+			display_positions[captured_id] = 0
+	layout_stacks()
+
+func reconcile_state(snapshot: Dictionary) -> void:
+	# A resync can arrive without its TOKEN_MOVED event. Animate the visible
+	# progress to the snapshot, but never replay hops already presented.
+	var incoming: Array = snapshot.get("tokens", [])
+	# A fresh board/rematch is a reset, not a set of captures to replay.
+	if snapshot.get("phase", "") == "lobby" or incoming.all(func(token): return int(token.position) == 0):
+		return
+	for token in incoming:
+		var id := str(token.id)
+		if not pawns.has(id):
+			continue
+		var from := int(display_positions.get(id, tokens[id].position))
+		var to := int(token.position)
+		if to > from:
+			if from == 0 and to > 1:
+				await animate_move({"tokenId": id, "from": 0, "to": 1, "durationMs": 240})
+				from = 1
+			await animate_move({"tokenId": id, "from": from, "to": to, "durationMs": maxi(1, to - from) * 240})
+		elif to == 0 and from > 0:
+			var index := int(id.get_slice("-", id.get_slice_count("-") - 1))
+			await pawns[id].hop_to(BoardMath.world(str(token.color), 0, index), 0.20, reduced_motion)
+			display_positions[id] = 0
 
 func token_at_screen(point: Vector2) -> String:
 	# Test the complete visible pin, including its animated head, rather than
@@ -453,3 +440,68 @@ func _gui_input(event: InputEvent) -> void:
 	var id := token_at_screen(point)
 	if not id.is_empty():
 		token_pressed.emit(id)
+
+func show_departed(state: Dictionary) -> void:
+	var departed: Array = state.get("departedPlayers",[])
+	for id in departure_labels.keys():
+		if not departed.any(func(player): return str(player.id) == str(id)):
+			departure_labels[id].queue_free()
+			departure_labels.erase(id)
+	for player in departed:
+		if departure_labels.has(player.id):
+			continue
+		var center := BoardMath.world(str(player.color),0,0).lerp(BoardMath.world(str(player.color),0,3),0.5)
+		var badge := make_badge("LEFT THE\nGAME",Color("14263f"),center+Vector3(0,0.8,0))
+		# Draw after the alpha-sorted printed board so far corners stay readable.
+		badge.render_priority = 8
+		badge.outline_render_priority = 7
+		badge.outline_modulate = Color("fff2cf")
+		badge.outline_size = 8
+		badge.font_size = 54
+		badge.pixel_size = 0.012
+		departure_labels[player.id] = badge
+
+func animate_departures(snapshot: Dictionary) -> void:
+	var present: Dictionary = {}
+	for token in snapshot.get("tokens",[]):
+		present[str(token.id)] = true
+	var leaving: Array = []
+	for id in pawns:
+		if not present.has(id):
+			leaving.append(id)
+	if leaving.is_empty() or reduced_motion:
+		return
+	for badge in stack_labels:
+		badge.hide()
+	for id in leaving:
+		var pawn = pawns[id]
+		pawn.vanish()
+		departure_smoke(pawn.position)
+	await get_tree().create_timer(1.35).timeout
+
+func departure_smoke(at: Vector3) -> void:
+	# Soft overlapping billows rise as a ghost silhouette fades into shadow.
+	for index in range(7):
+		var puff := MeshInstance3D.new()
+		var mesh := QuadMesh.new()
+		mesh.size = Vector2.ONE*(0.65+index*0.09)
+		puff.mesh = mesh
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		material.render_priority = 3
+		material.albedo_texture = trail_texture
+		material.albedo_color = Color(0.14,0.17,0.22,0.0)
+		puff.material_override = material
+		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		puff.position = at+Vector3(sin(index*2.4)*0.25,0.25+index*0.12,cos(index*2.4)*0.18)
+		world.add_child(puff)
+		var tween := puff.create_tween()
+		tween.tween_interval(index*0.035)
+		tween.tween_property(material,"albedo_color:a",0.65,0.22)
+		tween.parallel().tween_property(puff,"position",puff.position+Vector3(sin(index)*0.3,0.65,0),0.5)
+		tween.parallel().tween_property(puff,"scale",Vector3.ONE*2.3,0.5)
+		tween.tween_property(material,"albedo_color:a",0.0,0.55)
+		tween.tween_callback(puff.queue_free)

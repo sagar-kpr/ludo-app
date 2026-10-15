@@ -15,8 +15,8 @@ export function Board({ state, onMove, preview = false, connected = false, highl
     <div style={{ position: 'absolute', top: '40%', left: '40%', width: '20%', height: '20%', background: '#252943', display: 'grid', placeItems: 'center', color: '#ffbf4b' }}><Crown /></div>
     {state.tokens.map((token) => {
       const index = Number(token.id.slice(token.id.lastIndexOf('-')+1));
-      const legal = connected && state.currentPlayer === 'you' && token.color === own && state.phase === 'moving' && canMove(token, state.dice);
-      return <Pawn key={token.id} token={token} index={index} legal={legal && !preview} highlighted={!preview && token.color === highlightColor} onMove={onMove} />;
+      const legal = connected && state.currentPlayer === 'you' && token.color === own && state.phase === 'moving' && canMove(token, state.dice, state.tokens);
+      return <Pawn key={token.id} token={token} index={index} legal={legal && !preview} highlighted={!preview && token.color === highlightColor && state.phase === 'moving' && canMove(token, state.dice, state.tokens)} onMove={onMove} />;
     })}
   </div>;
 }

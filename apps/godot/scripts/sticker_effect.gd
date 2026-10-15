@@ -65,15 +65,23 @@ func _process(delta: float) -> void:
 		queue_free()
 
 func hit() -> void:
-	burst = 1
+	burst = 0 if kind in ["ANGRY","SAD","CRY","SURPRISED","THINKING"] else 1
 	contact.emit(kind)
 	if kind in ["HAMMER","BOOM","PUNCH","TOMATO","EGG"]:
 		recipient.avatar.react("hit")
-	else:
+	elif kind not in ["ANGRY","SAD","CRY","SURPRISED","THINKING"]:
 		recipient.avatar.react("happy")
 
 func animate_action(t: float) -> void:
 	match kind:
+		"THUMBS_UP", "HAPPY", "ANGRY", "SAD", "CRY", "SURPRISED", "WINK", "THINKING":
+			if strikes == 0:
+				strikes = 1
+				hit()
+			if kind in ["HAPPY","THUMBS_UP"]:
+				art.position.y = -absf(sin(t*6))*7
+			elif kind == "SURPRISED":
+				art.scale = Vector2.ONE*(1.0+sin(t*5)*0.09)
 		"PUNCH":
 			var phase := fmod(t,0.65)
 			art.position.x = 20*(1-clampf(phase/0.12,0,1))

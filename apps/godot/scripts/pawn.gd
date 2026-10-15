@@ -14,6 +14,9 @@ var selection_enabled := true
 var glow_floor: MeshInstance3D
 var cell_shadow: MeshInstance3D
 var token_color := Color.WHITE
+var completed := false
+var departing := false
+var finish_badge: Control
 
 func lacquer(color: Color) -> ShaderMaterial:
 	# Soft enamel shading keeps coloured faces bright while showing their curve.
@@ -22,6 +25,7 @@ func lacquer(color: Color) -> ShaderMaterial:
 	shader_type spatial;
 	render_mode unshaded;
 	uniform vec4 tint : source_color;
+	uniform float exit_amount = 0.0;
 	uniform float face_curvature = 0.0;
 	varying vec3 world_normal;
 	varying vec3 world_position;
@@ -42,7 +46,8 @@ func lacquer(color: Color) -> ShaderMaterial:
 		float rim = pow(1.0-max(dot(n,v),0.0),3.0)*max(n.y,0.0);
 		float shine = clamp(highlight*0.24+softbox*0.08+rim*0.07,0.0,0.35);
 		float light = 0.80+0.20*max(dot(n,key),0.0);
-		ALBEDO = mix(tint.rgb*light,vec3(1.0),shine);
+		ALBEDO = mix(mix(tint.rgb*light,vec3(1.0),shine),vec3(0.12,0.15,0.20),exit_amount);
+		if (exit_amount > fract(sin(dot(FRAGCOORD.xy,vec2(12.9898,78.233)))*43758.5453)) discard;
 	}
 	"""
 	var finish := ShaderMaterial.new()
@@ -56,8 +61,10 @@ func sculpted_finish(color: Color) -> ShaderMaterial:
 	shader_type spatial;
 	render_mode diffuse_burley, specular_schlick_ggx;
 	uniform vec4 tint : source_color;
+	uniform float exit_amount = 0.0;
 	void fragment() {
-		ALBEDO = tint.rgb * 0.78;
+		ALBEDO = mix(tint.rgb * 0.78,vec3(0.12,0.15,0.20),exit_amount);
+		if (exit_amount > fract(sin(dot(FRAGCOORD.xy,vec2(12.9898,78.233)))*43758.5453)) discard;
 		ROUGHNESS = 0.23;
 		METALLIC = 0.08;
 		SPECULAR = 0.65;
@@ -74,20 +81,14 @@ func configure(id: String, color: Color) -> void:
 	# A feathered patch marks the occupied cell without adding a physical foot.
 	var shadow_mesh := QuadMesh.new()
 	shadow_mesh.size = Vector2(0.82,0.82)
-	var shadow_shader := Shader.new()
-	shadow_shader.code = """
-	shader_type spatial;
-	render_mode unshaded,cull_disabled,depth_draw_never;
-	uniform vec4 tint : source_color;
-	void fragment() {
-		float r = length((UV-vec2(0.5))*2.0);
-		ALBEDO = tint.rgb;
-		ALPHA = (1.0-smoothstep(0.15,1.0,r))*0.42;
-	}
-	"""
-	var shadow_material := ShaderMaterial.new()
-	shadow_material.shader = shadow_shader
-	shadow_material.set_shader_parameter("tint",color.lightened(0.25))
+	var shadow_material := StandardMaterial3D.new()
+	shadow_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shadow_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shadow_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	shadow_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	shadow_material.render_priority = 2
+	shadow_material.albedo_texture = Design.pawn_shadow_texture()
+	shadow_material.albedo_color = Color(color, Design.TOKENS.pawn_shadow_opacity)
 	cell_shadow = part(shadow_mesh,Vector3(0,0.005,0),shadow_material)
 	cell_shadow.name = "CellShadow"
 	cell_shadow.rotation.x = -PI/2
@@ -132,6 +133,7 @@ func configure(id: String, color: Color) -> void:
 	shader_type spatial;
 	render_mode unshaded,cull_disabled,depth_draw_never;
 	uniform vec4 tint : source_color;
+	uniform float exit_amount = 0.0;
 	uniform bool animate = true;
 	void fragment() {
 		vec2 point = (UV-vec2(0.5))*2.0;
@@ -156,6 +158,7 @@ func configure(id: String, color: Color) -> void:
 	shader_type spatial;
 	render_mode unshaded,cull_disabled,depth_draw_never;
 	uniform vec4 tint : source_color;
+	uniform float exit_amount = 0.0;
 	void fragment() {
 		float r = length((UV-vec2(0.5))*2.0);
 		ALBEDO = tint.rgb;
@@ -187,15 +190,29 @@ func part(mesh: Mesh, at: Vector3, mat: Material) -> MeshInstance3D:
 	add_child(instance)
 	return instance
 
+func set_completed(value: bool) -> void:
+	completed = value
+	if is_instance_valid(finish_badge):
+		finish_badge.visible = value
+	if value:
+		legal_move = false
+		highlight = false
+		ring.hide()
+		glow_floor.hide()
+		visual.position = Vector3.ZERO
+		visual.scale = Vector3.ONE
+
+func _exit_tree() -> void:
+	if is_instance_valid(finish_badge):
+		finish_badge.queue_free()
+
 func _process(_delta: float) -> void:
-	if cell_shadow:
-		# The pawn hops above the table, while its shadow stays on the table.
-		var floor_position := cell_shadow.global_position
-		floor_position.y = 0.225
-		cell_shadow.global_position = floor_position
-	var selected := legal_move and selection_enabled and not moving
+	if departing:
+		return
+	place_shadow()
+	var selected := legal_move and selection_enabled and not moving and not completed
 	if ring:
-		ring.visible = (highlight or selected) and not moving
+		ring.visible = (highlight or selected) and not moving and not completed
 		ring.material_override.set_shader_parameter("animate",not reduced_motion)
 		glow_floor.visible = selected
 	if visual and not moving:
@@ -204,12 +221,23 @@ func _process(_delta: float) -> void:
 		visual.position.y = loop*0.43
 		visual.scale = Vector3.ONE*(1.0+0.12*loop)
 
+func place_shadow() -> void:
+	if cell_shadow:
+		# The stamp stays on the departed cell during a hop, then transfers to
+		# the landing cell. Idle stamps never fade, even in reduced motion.
+		var floor_position := resting if moving else global_position
+		floor_position.y = 0.226
+		cell_shadow.global_position = floor_position
+
 func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 	if reduced_motion:
 		position = destination
+		place_shadow()
 		return
 	var from := position
+	resting = global_position
 	moving = true
+	place_shadow()
 	visual.position = Vector3.ZERO
 	var tween := create_tween()
 	tween.tween_method(func(progress: float):
@@ -229,3 +257,25 @@ func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 	visual.position = Vector3.ZERO
 	visual.scale = Vector3.ONE
 	moving = false
+	place_shadow()
+
+func vanish() -> void:
+	departing = true
+	legal_move = false
+	highlight = false
+	ring.hide()
+	glow_floor.hide()
+	if is_instance_valid(finish_badge):
+		finish_badge.hide()
+	var tween := create_tween()
+	tween.tween_method(func(amount: float):
+		for mesh in visual.get_children():
+			if mesh is MeshInstance3D:
+				if mesh.material_override is ShaderMaterial:
+					mesh.material_override.set_shader_parameter("exit_amount",amount)
+				elif mesh.material_override is StandardMaterial3D:
+					mesh.material_override.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					mesh.material_override.albedo_color.a = 1.0-amount
+		visual.position.y = amount*0.3
+		cell_shadow.material_override.albedo_color.a = (1.0-amount)*Design.TOKENS.pawn_shadow_opacity
+	,0.0,1.0,0.85)
