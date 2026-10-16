@@ -76,7 +76,7 @@ func run() -> void:
 		check_mesh_winding(body.mesh,"Beveled location pin")
 		check(body.mesh.get_aabb().size.y > 1.4, "Token has a tall location-pin silhouette")
 		check(pawn.has_node("PinVisual/PinBadge"), "Location pin has a contrasting round badge")
-		check(pawn.has_node("ContactShadow"), "Pawn has grounding contact shadow")
+		check(is_instance_valid(pawn.cell_shadow) and pawn.cell_shadow.visible, "Pawn has grounding contact shadow")
 	check(host.game_view.visible and not host.content.get_node("SetupScroll").visible, "Game is non-scrollable")
 	await process_frame
 	check(host.game_background.visible, "Clean game background is visible during play")
@@ -170,7 +170,7 @@ func run() -> void:
 		pin._process(0)
 		check(pin.ring.visible and pin.visual.scale == Vector3.ONE and pin.visual.position.y == 0, "Reduced motion retains legal ring without bounce or scaling")
 		pin.reduced_motion = active.reduced_motion
-		check(pin.ring.material_override.albedo_color == pin.token_color, "Selectable base ring matches token color")
+		check(pin.ring.mesh is TorusMesh and pin.ring.material_override.metallic > 0.7, "Selectable feet have a solid metallic ring")
 		check(pin.glow_floor.material_override.get_shader_parameter("tint") == pin.token_color, "Selectable aura matches token color")
 		for height in [0.05,0.75,1.40]:
 			var point: Vector2 = active.board.camera.unproject_position(pin.visual.to_global(Vector3(0,height,0.22)))

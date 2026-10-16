@@ -21,7 +21,7 @@ func _ready() -> void:
 		voices.append(player)
 
 func synthesize(kind: String) -> AudioStreamWAV:
-	var duration := 0.075 if kind == "dice" else 0.11 if kind == "dice_settle" else 0.30 if kind == "capture" else 0.16 if kind == "chat" else 0.075
+	var duration := 0.075 if kind == "dice" else 0.11 if kind == "dice_settle" else 0.30 if kind == "capture" else 0.16 if kind == "chat" else 0.13 if kind == "step" else 0.075
 	var rate := 22050
 	var data := PackedByteArray()
 	data.resize(int(duration*rate)*2)
@@ -30,7 +30,12 @@ func synthesize(kind: String) -> AudioStreamWAV:
 		var envelope := minf(t/0.003,1.0)*pow(maxf(0,1.0-t/duration),2.0)
 		var pitch := 660.0 if kind == "chat" else 330.0 if kind == "step" else 520.0-t*850 if kind == "capture" else 190.0 if kind == "dice_settle" else 230.0
 		var wave := sin(TAU*pitch*t)*0.65 + sin(TAU*pitch*1.51*t)*0.18
-		if kind == "sticker_hit":
+		if kind == "step":
+			# A short springy chirp, with a falling pitch integrated into its
+			# phase. It finishes before the next 240ms landing on mobile too.
+			var phase := TAU*(720.0*t - 1700.0*t*t)
+			wave = sin(phase)*0.78 + sin(phase*2.0)*0.16
+		elif kind == "sticker_hit":
 			wave = sin(TAU*(95-t*220)*t)*exp(-t*30)+sin(t*11003)*exp(-t*90)*0.4
 		elif kind == "sticker_cheer":
 			wave = sin(TAU*880*t)*0.5+sin(TAU*1320*t)*0.3
@@ -50,7 +55,7 @@ func cue(kind: String, local_haptic: bool = false, strength: float = 1.0) -> voi
 		var voice := voices[next_voice]
 		next_voice = (next_voice+1)%voices.size()
 		voice.stream = samples[kind]
-		voice.volume_db = (-18.0 if kind == "step" else -16.0 if kind == "chat" else -10.0 if kind == "capture" else -12.0) + linear_to_db(clampf(strength,0.1,1.0))
+		voice.volume_db = (-11.0 if kind == "step" else -16.0 if kind == "chat" else -10.0 if kind == "capture" else -12.0) + linear_to_db(clampf(strength,0.1,1.0))
 		voice.pitch_scale = 0.90+strength*0.10 if kind == "dice" else 1.0
 		voice.play()
 	if haptics_enabled and local_haptic:

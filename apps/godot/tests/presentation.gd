@@ -41,8 +41,14 @@ func run() -> void:
 		client.online = true
 		client.reduced_motion = false
 		client.board.reduced_motion = false
-		client.feedback.sound_enabled = false
+		client.feedback.sound_enabled = true
 		client.feedback.haptics_enabled = false
+		client.board.step_landed.connect(func(_id: String):
+			var sound = client.feedback
+			var voice = sound.voices[(sound.next_voice+sound.voices.size()-1)%sound.voices.size()]
+			check(sound.last_cue == "step" and voice.stream == sound.samples["step"] and voice.playing and voice.get_playback_position() < 0.06, "Every landing starts a fresh hop sound on actor and observer")
+			check(voice.volume_db >= -12.0, "Hop sound remains audible alongside the dice")
+		)
 	actor.self_id = "a"
 	observer.self_id = "b"
 	var actor_steps: Array[Vector3] = []
@@ -148,6 +154,11 @@ func run() -> void:
 		check(client.game.phase == "rolling" and client.game.currentPlayer == "a", "Timeout move preserves the six bonus turn")
 		check(client.cards[0].status_label.text == "0:30", "Next roll gets a fresh 30-second clock after landing")
 	for client in clients:
+		check(client.feedback.samples["step"].get_length() > 0.10 and client.feedback.samples["step"].get_length() < 0.24, "Hop sound ends before the next cell landing")
+		client.feedback.sound_enabled = false
+		var next_voice: int = client.feedback.next_voice
+		client.feedback.cue("step")
+		check(client.feedback.next_voice == next_voice, "Muting sound also silences pawn hops")
 		client.queue_free()
 	await process_frame
 	print("Presentation: %d checks, %d failures" % [checks, failures])

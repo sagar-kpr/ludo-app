@@ -40,11 +40,31 @@ func run() -> void:
 		check(pawn.cell_shadow.material_override.albedo_texture == board.trail_texture, "Permanent and fading shadows reuse the same texture")
 		check(pawn.cell_shadow.material_override.render_priority > board.board_plane.material_override.render_priority, "Board cannot cover stationary shadows")
 	var shadow_pawn = board.pawns["coral-0"]
+	shadow_pawn.set_process(false)
+	shadow_pawn.reduced_motion = false
+	shadow_pawn._process(0)
+	check(shadow_pawn.ring.visible, "Legal pawn displays its feet ring during selection")
+	check(shadow_pawn.ring.mesh is TorusMesh and shadow_pawn.ring.material_override.metallic > 0.7, "Selection uses a solid metal hoop instead of a flat glow")
+	var ring_angle: float = shadow_pawn.ring.rotation.y
+	shadow_pawn._process(0.25)
+	check(is_equal_approx(shadow_pawn.ring.rotation.y-ring_angle,0.6), "Feet ring rotates continuously while a pawn is selectable")
+	shadow_pawn.reduced_motion = true
+	ring_angle = shadow_pawn.ring.rotation.y
+	shadow_pawn._process(0.25)
+	check(shadow_pawn.ring.visible and shadow_pawn.ring.rotation.y == ring_angle, "Reduced motion keeps the ring visible and stops its rotation")
+	shadow_pawn.reduced_motion = false
+	shadow_pawn.selection_enabled = false
+	shadow_pawn._process(0.25)
+	check(not shadow_pawn.ring.visible, "Ring disappears when pawn selection is locked")
+	shadow_pawn.selection_enabled = true
+	shadow_pawn._process(0)
+	shadow_pawn.set_process(true)
 	var departure: Vector3 = shadow_pawn.position
 	shadow_pawn.hop_to(departure + Vector3.RIGHT, 0.24, false)
 	await create_timer(0.10).timeout
 	shadow_pawn.place_shadow()
 	check(shadow_pawn.moving, "Hop is still underway during the shadow check")
+	check(not shadow_pawn.ring.visible and not shadow_pawn.glow_floor.visible, "Ring and aura hide during a pawn hop")
 	check(Vector2(shadow_pawn.cell_shadow.global_position.x, shadow_pawn.cell_shadow.global_position.z).is_equal_approx(Vector2(departure.x, departure.z)), "Shadow remains on the departure cell while the pawn hops")
 	await create_timer(0.20).timeout
 	check(Vector2(shadow_pawn.cell_shadow.global_position.x, shadow_pawn.cell_shadow.global_position.z).is_equal_approx(Vector2(departure.x + 1, departure.z)), "Shadow transfers to the landing cell")

@@ -126,30 +126,38 @@ func configure(id: String, color: Color) -> void:
 	center.name = "PinBadge"
 	center.rotation.x = PI/2.0
 	center.reparent(visual,false)
-	var halo := QuadMesh.new()
-	halo.size = Vector2(1.2,1.2)
-	var ring_shader := Shader.new()
-	ring_shader.code = """
-	shader_type spatial;
-	render_mode unshaded,cull_disabled,depth_draw_never;
-	uniform vec4 tint : source_color;
-	uniform float exit_amount = 0.0;
-	uniform bool animate = true;
-	void fragment() {
-		vec2 point = (UV-vec2(0.5))*2.0;
-		float r = length(point);
-		float band = smoothstep(0.68,0.74,r)*(1.0-smoothstep(0.82,0.88,r));
-		float angle = atan(point.y,point.x)-(animate ? TIME*3.0 : 0.0);
-		float sweep = pow(0.5+0.5*cos(angle),3.0);
-		ALBEDO = tint.rgb;
-		ALPHA = band*(0.18+0.70*sweep);
-	}
-	"""
-	var glow := ShaderMaterial.new()
-	glow.shader = ring_shader
-	glow.set_shader_parameter("tint",color.lightened(0.30))
-	ring = part(halo, Vector3(0, 0.01, 0), glow)
-	ring.rotation.x = -PI/2
+	# A real metal hoop rests around the tip. Colored studs make its rotation
+	# readable even when the reflective torus itself is circularly symmetric.
+	var hoop := TorusMesh.new()
+	hoop.inner_radius = 0.36
+	hoop.outer_radius = 0.47
+	hoop.rings = 48
+	hoop.ring_segments = 12
+	var metal := StandardMaterial3D.new()
+	metal.albedo_color = Color("e6d5ad")
+	metal.metallic = 0.78
+	metal.roughness = 0.24
+	metal.emission_enabled = true
+	metal.emission = Color("b7a27c")
+	metal.emission_energy_multiplier = 0.22
+	ring = part(hoop, Vector3(0, 0.065, 0), metal)
+	ring.name = "SelectionRing"
+	var inlay := StandardMaterial3D.new()
+	inlay.albedo_color = color
+	inlay.metallic = 0.45
+	inlay.roughness = 0.22
+	inlay.emission_enabled = true
+	inlay.emission = color
+	inlay.emission_energy_multiplier = 0.30
+	var stud := SphereMesh.new()
+	stud.radius = 0.065
+	stud.height = 0.075
+	stud.radial_segments = 12
+	stud.rings = 6
+	for index in range(3):
+		var angle := TAU*index/3.0
+		var accent := part(stud,Vector3(cos(angle)*0.415,0.035,sin(angle)*0.415),inlay)
+		accent.reparent(ring,false)
 	ring.visible = false
 	var aura := QuadMesh.new()
 	aura.size = Vector2(1.65,1.65)
@@ -206,14 +214,15 @@ func _exit_tree() -> void:
 	if is_instance_valid(finish_badge):
 		finish_badge.queue_free()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if departing:
 		return
 	place_shadow()
 	var selected := legal_move and selection_enabled and not moving and not completed
 	if ring:
-		ring.visible = (highlight or selected) and not moving and not completed
-		ring.material_override.set_shader_parameter("animate",not reduced_motion)
+		ring.visible = selected
+		if ring.visible and not reduced_motion:
+			ring.rotation.y = fposmod(ring.rotation.y + delta*2.4,TAU)
 		glow_floor.visible = selected
 	if visual and not moving:
 		var loop := (1.0-cos(Time.get_ticks_msec()*TAU/1000.0))*0.5 if selected and not reduced_motion else 0.0
@@ -237,6 +246,8 @@ func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 	var from := position
 	resting = global_position
 	moving = true
+	ring.hide()
+	glow_floor.hide()
 	place_shadow()
 	visual.position = Vector3.ZERO
 	var tween := create_tween()
