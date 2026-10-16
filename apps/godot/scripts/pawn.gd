@@ -1,5 +1,7 @@
 extends Node3D
 
+signal glide_passed(point_index: int)
+
 const Design = preload("res://scripts/design.gd")
 const Geometry = preload("res://scripts/geometry.gd")
 var token_id := ""
@@ -11,6 +13,7 @@ var resting := Vector3.ZERO
 var visual: Node3D
 var base_visual: Node3D
 var moving := false
+var sliding := false
 var selection_enabled := true
 var glow_floor: MeshInstance3D
 var cell_shadow: MeshInstance3D
@@ -263,7 +266,7 @@ func place_shadow() -> void:
 	if cell_shadow:
 		# The stamp stays on the departed cell during a hop, then transfers to
 		# the landing cell. Idle stamps never fade, even in reduced motion.
-		var floor_position := resting if moving else global_position
+		var floor_position := resting if moving and not sliding else global_position
 		floor_position.y = 0.226
 		cell_shadow.global_position = floor_position
 
@@ -296,6 +299,34 @@ func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 	position = destination
 	visual.position = Vector3.ZERO
 	visual.scale = Vector3.ONE
+	moving = false
+	place_shadow()
+
+func glide_path(points: Array[Vector3], durations: Array[float], instant: bool) -> void:
+	if points.is_empty():
+		return
+	visual.position = Vector3.ZERO
+	visual.scale = Vector3.ONE
+	ring.hide()
+	glow_floor.hide()
+	if instant:
+		position = points.back()
+		place_shadow()
+		glide_passed.emit(points.size()-1)
+		return
+	moving = true
+	sliding = true
+	var tween := create_tween()
+	for index in range(points.size()):
+		# One uninterrupted linear path: no spring, squash or pause per cell.
+		var departure := position if index == 0 else points[index-1]
+		tween.tween_method(func(at: Vector3):
+			position = at
+			place_shadow()
+		,departure,points[index],durations[index]).set_trans(Tween.TRANS_LINEAR)
+		tween.tween_callback(func(): glide_passed.emit(index))
+	await tween.finished
+	sliding = false
 	moving = false
 	place_shadow()
 

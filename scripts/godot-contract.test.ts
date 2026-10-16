@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { TRACK, SAFE_CELLS, START_OFFSETS } from '../packages/game-engine/src/board';
+import { CAPTURE_STEP_MS, CAPTURE_HOME_MS } from '../packages/game-engine/src/motion';
 import { COLORS, HOME } from '../packages/game-engine/src/types';
 
 it('Godot coordinate adapter retains the authoritative engine track and seat order', () => {
@@ -22,4 +23,10 @@ it('Godot deployment is separate from the existing live Expo configuration', () 
   const current = JSON.parse(readFileSync('firebase.json', 'utf8'));
   expect(godot.hosting.public).toBe('apps/godot/dist');
   expect(current.hosting.public).toBe('apps/mobile/dist');
+});
+
+it('server turn clocks reserve the same reverse-hop timing used by Godot', () => {
+  const source = readFileSync('apps/godot/scripts/board.gd', 'utf8');
+  expect(Number(source.match(/const CAPTURE_STEP_MS := (\d+)/)![1])).toBe(CAPTURE_STEP_MS);
+  expect(Number(source.match(/const CAPTURE_HOME_MS := (\d+)/)![1])).toBe(CAPTURE_HOME_MS);
 });

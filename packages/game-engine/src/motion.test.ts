@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moveWaypoints } from './motion';
+import { moveWaypoints, captureReturnDurationMs } from './motion';
 import { tokenCoordinate } from './board';
 import { HOME } from './types';
 
@@ -24,4 +24,11 @@ describe('visual movement path', () => {
     expect(moveWaypoints(captured, 15, 0)).toEqual([tokenCoordinate(captured, 0)]);
     expect(moveWaypoints(captured, 0, 0)).toEqual([]);
   });
+});
+
+it('reserves the reverse journey before the next turn clock begins', () => {
+  expect(captureReturnDurationMs(0)).toBe(0);
+  expect(captureReturnDurationMs(1)).toBe(128);
+  expect(captureReturnDurationMs(15)).toBe(1024);
+  expect(captureReturnDurationMs(51)).toBe(3328);
 });

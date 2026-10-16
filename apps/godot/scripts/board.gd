@@ -2,6 +2,7 @@ extends SubViewportContainer
 
 signal token_pressed(token_id: String)
 signal step_landed(token_id: String)
+signal capture_passed(token_id: String)
 signal token_captured(mover_id: String, captured_id: String)
 const Design = preload("res://scripts/design.gd")
 const BoardMath = preload("res://scripts/board_math.gd")
@@ -26,6 +27,8 @@ var departure_labels: Dictionary = {}
 var trails: Array[MeshInstance3D] = []
 const TRAIL_POOL_SIZE := 16
 const FRAMING_WIDTH := 16.0
+const CAPTURE_STEP_MS := 64
+const CAPTURE_HOME_MS := 128
 var trail_pool: Array[MeshInstance3D] = []
 var trail_fades: Dictionary = {}
 var trail_texture: GradientTexture2D
@@ -400,11 +403,36 @@ func animate_move(event: Dictionary) -> void:
 	for captured_id in event.get("captured", []):
 		if pawns.has(captured_id):
 			token_captured.emit(id,str(captured_id))
-			var captured: Dictionary = tokens[captured_id]
-			var captured_index := int(str(captured_id).get_slice("-", str(captured_id).get_slice_count("-") - 1))
-			await pawns[captured_id].hop_to(BoardMath.world(str(captured.color), 0, captured_index), 0.20, reduced_motion)
-			display_positions[captured_id] = 0
+			await animate_capture(str(captured_id))
 	layout_stacks()
+
+func animate_capture(id: String) -> void:
+	if not pawns.has(id):
+		return
+	var from := int(display_positions.get(id,tokens[id].position))
+	if from <= 0:
+		return
+	var pawn: Node3D = pawns[id]
+	var color := str(tokens[id].color)
+	var index := int(id.get_slice("-",id.get_slice_count("-")-1))
+	pawn.legal_move = false
+	pawn.highlight = false
+	pawn.selection_enabled = false
+	pawn.scale = Vector3.ONE
+	var points: Array[Vector3] = []
+	var durations: Array[float] = []
+	var positions: Array[int] = []
+	for landing in range(from-1,-1,-1):
+		points.append(BoardMath.world(color,landing,index))
+		durations.append((CAPTURE_HOME_MS if landing == 0 else CAPTURE_STEP_MS)/1000.0)
+		positions.append(landing)
+	var passed := func(point_index: int):
+		display_positions[id] = positions[point_index]
+		# Capture progress is deliberately separate from audible step landings.
+		capture_passed.emit(id)
+	pawn.glide_passed.connect(passed)
+	await pawn.glide_path(points,durations,reduced_motion)
+	pawn.glide_passed.disconnect(passed)
 
 func reconcile_state(snapshot: Dictionary) -> void:
 	# A resync can arrive without its TOKEN_MOVED event. Animate the visible
@@ -425,9 +453,8 @@ func reconcile_state(snapshot: Dictionary) -> void:
 				from = 1
 			await animate_move({"tokenId": id, "from": from, "to": to, "durationMs": maxi(1, to - from) * 240})
 		elif to == 0 and from > 0:
-			var index := int(id.get_slice("-", id.get_slice_count("-") - 1))
-			await pawns[id].hop_to(BoardMath.world(str(token.color), 0, index), 0.20, reduced_motion)
-			display_positions[id] = 0
+			token_captured.emit("",id)
+			await animate_capture(id)
 
 func token_at_screen(point: Vector2) -> String:
 	# Test the complete visible pin, including its animated head, rather than

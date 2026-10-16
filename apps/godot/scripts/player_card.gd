@@ -34,6 +34,7 @@ var turn_own := false
 var finish_rank := -1
 var clock_accumulator := 0.0
 var touch_tween: Tween
+var compact_height := false
 var media_row: HBoxContainer
 var dice_slot: HBoxContainer
 
@@ -189,17 +190,22 @@ func _ready() -> void:
 	invite.pressed.connect(func(): invite_pressed.emit())
 	row.add_child(invite)
 
-func fit_width(available_width: float) -> void:
-	custom_minimum_size.x = minf(180.0,available_width)
+func fit_width(available_width: float, viewport_height: float = 860.0) -> void:
+	compact_height = viewport_height < 680.0
+	custom_minimum_size.x = minf(156.0 if compact_height else 180.0,available_width)
 	var compact := available_width < 164.0
-	var portrait_size := 64.0 if compact else 72.0
-	var dice_size := 48.0 if compact else 56.0
+	var portrait_size := 50.0 if viewport_height < 450.0 else 56.0 if compact_height else 64.0 if compact else 72.0
+	var dice_size := 48.0 if compact or compact_height else 56.0
 	avatar.custom_minimum_size = Vector2.ONE*portrait_size
 	roll.custom_minimum_size = Vector2.ONE*dice_size
 	dice.custom_minimum_size = Vector2.ONE*dice_size
 	dice_slot.custom_minimum_size = Vector2(dice_size,portrait_size)
 	media_row.custom_minimum_size.y = portrait_size
-	media_row.add_theme_constant_override("separation",12 if compact else 14)
+	media_row.add_theme_constant_override("separation",12 if compact or compact_height else 14)
+	if panel.has_theme_stylebox_override("panel"):
+		var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
+		style.content_margin_top = 6 if compact_height else 8
+		style.content_margin_bottom = 10 if compact_height else 13
 
 func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) -> void:
 	departed = bool(player.get("departed",false))
@@ -218,8 +224,8 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.shadow_size = 5 if active and not departed else 3
 	style.content_margin_left = 10
 	style.content_margin_right = 10
-	style.content_margin_top = 8
-	style.content_margin_bottom = 13
+	style.content_margin_top = 6 if compact_height else 8
+	style.content_margin_bottom = 10 if compact_height else 13
 	panel.add_theme_stylebox_override("panel",style)
 	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
 	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))

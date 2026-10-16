@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { randomBytes, randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { MAX_TIMEOUT_LIVES, diceSidesForRoll, autoMoveToken, createGame, moveToken, rollDice, startGame, restartGame, removePlayer, type Color, type GameState, type Player } from '../../../packages/game-engine/src/index';
-import { STEP_MS } from '../../../packages/game-engine/src/motion';
+import { MAX_TIMEOUT_LIVES, diceValuesForRoll, autoMoveToken, createGame, moveToken, rollDice, startGame, restartGame, removePlayer, type Color, type GameState, type Player } from '../../../packages/game-engine/src/index';
+import { STEP_MS, captureReturnDurationMs } from '../../../packages/game-engine/src/motion';
 import { STICKERS } from '../../../packages/shared/src/stickers';
 import { DICE_ROLL_MS } from '../../../packages/shared/src/dice';
 import { persistChat, persistRoom, persistenceEnabled } from './persistence';
@@ -37,8 +37,11 @@ function expireRoom(room: Room) {
   if (!action) return false;
   if (action.type === 'pass') {
     // An impossible move is not inactivity; there was no choice to make.
+    const blockedRoll = room.state.phase === 'rolling';
+    const playerId = room.state.currentPlayer;
     room.state = action.state;
     resetClock(room);
+    if (blockedRoll) publish(room, { type: 'TURN_SKIPPED', playerId, reason: 'friendly_occupancy', version: room.state.version });
     state(room);
     return true;
   }
@@ -88,20 +91,29 @@ function applyMove(room: Room, tokenId: string, automatic = false, presentationM
   room.state = next;
   const durationMs = (from === 0 ? 1 : to-from)*STEP_MS;
   const delayMs = automatic ? presentationMs : 0;
-  room.busyUntil = Date.now()+delayMs+durationMs;
+  const captureDurationMs = captured.reduce((total, id) => total+captureReturnDurationMs(previous.tokens.find(token => token.id === id)!.position), 0);
+  room.busyUntil = Date.now()+delayMs+durationMs+captureDurationMs;
   resetClock(room);
-  publish(room, { type: 'TOKEN_MOVED', tokenId, from, to, captured, automatic, timedOut, durationMs, delayMs, version: next.version });
+  publish(room, { type: 'TOKEN_MOVED', tokenId, from, to, captured, automatic, timedOut, durationMs, captureDurationMs, delayMs, version: next.version });
   state(room);
   return true;
 }
 function applyRoll(room: Room, timedOut = false) {
   const playerId = room.state.currentPlayer;
   const color = room.players.find(player => player.id === playerId)?.color;
-  const sides = diceSidesForRoll(room.state);
-  const value = randomInt(1, sides + 1);
-  const next = rollDice(room.state, () => (value - 1) / sides);
+  const values = diceValuesForRoll(room.state);
+  const bucket = values.length ? randomInt(1, values.length+1)-1 : 0;
+  const value = values[bucket];
+  const next = rollDice(room.state, () => (bucket+0.5)/Math.max(1, values.length));
   if (next === room.state) return false;
   room.state = next;
+  if (value === undefined) {
+    room.busyUntil = Date.now();
+    resetClock(room);
+    publish(room, { type: 'TURN_SKIPPED', playerId, reason: 'friendly_occupancy', version: next.version });
+    state(room);
+    return true;
+  }
   const presentationMs = DICE_ROLL_MS;
   room.busyUntil = Date.now()+presentationMs;
   resetClock(room);

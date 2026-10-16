@@ -15,6 +15,11 @@ var chat_bubbles
 var network
 var board
 var board_holder: MarginContainer
+var player_rows: Array[HBoxContainer] = []
+var landscape_view: HBoxContainer
+var left_profiles: VBoxContainer
+var right_profiles: VBoxContainer
+var using_landscape := false
 var content: VBoxContainer
 var home: VBoxContainer
 var home_card: VBoxContainer
@@ -77,8 +82,11 @@ func _process(delta: float) -> void:
 	if OS.has_feature("web") and is_instance_valid(name_input) and (web_form_elapsed >= 0.1 or home.is_visible_in_tree()):
 		web_form_elapsed = 0
 		sync_web_form()
-	if board and board.enabled and turn_deadline_ticks > 0 and Time.get_ticks_msec() >= turn_deadline_ticks:
-		refresh_controls()
+	if board and turn_deadline_ticks > 0 and online and not pending and not presenting:
+		var now := Time.get_ticks_msec()
+		var phase_open := now >= turn_deadline_ticks-turn_duration_ms and now < turn_deadline_ticks
+		if board.enabled != phase_open:
+			refresh_controls()
 
 func sync_web_form() -> void:
 	if not OS.has_feature("web"):
@@ -192,9 +200,22 @@ func _safe_area() -> void:
 	if game_view.visible and is_instance_valid(board):
 		var width_limit := available.x-8.0
 		for card in cards:
-			card.fit_width((width_limit-16.0)*0.5)
-		var top_row := game_view.get_child(0) as HBoxContainer
-		var bottom_row := game_view.get_child(2) as HBoxContainer
+			card.fit_width((width_limit-16.0)*0.5,available.y)
+		set_game_layout(available.x >= 640.0 and available.x > available.y*1.25)
+		if using_landscape:
+			var profile_width := 156.0 if available.y < 680.0 else 180.0
+			left_profiles.custom_minimum_size.x = profile_width
+			right_profiles.custom_minimum_size.x = profile_width
+			var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + inset_top + inset_bottom + content.get_theme_constant("separation")*2
+			var height_limit := maxf(80.0,available.y-chrome)
+			var width := floorf(minf(maxf(80.0,width_limit-profile_width*2-24.0),height_limit/board.preferred_height(1.0)))
+			content.custom_minimum_size.x = width+profile_width*2+24.0
+			board_holder.add_theme_constant_override("margin_top",0)
+			board.custom_minimum_size = Vector2(width,floorf(minf(height_limit,board.preferred_height(width))))
+			return
+		board.custom_minimum_size.x = 0
+		var top_row := player_rows[0]
+		var bottom_row := player_rows[1]
 		var rows := top_row.get_combined_minimum_size().y + bottom_row.get_combined_minimum_size().y
 		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + rows + inset_top + inset_bottom + content.get_theme_constant("separation")*2 + game_view.get_theme_constant("separation")*2
 		var height_limit := maxf(80.0,available.y-chrome)
@@ -209,6 +230,33 @@ func _safe_area() -> void:
 		board.custom_minimum_size.y = render_height
 	else:
 		content.custom_minimum_size.x = minf(600.0,available.x-24.0)
+
+func set_game_layout(landscape: bool) -> void:
+	if using_landscape == landscape:
+		return
+	using_landscape = landscape
+	if landscape:
+		for row in player_rows:
+			row.hide()
+		for seat in [0,3]:
+			cards[seat].reparent(left_profiles)
+		left_profiles.move_child(cards[0],0)
+		for seat in [1,2]:
+			cards[seat].reparent(right_profiles)
+		right_profiles.move_child(cards[1],0)
+		board_holder.reparent(landscape_view)
+		landscape_view.move_child(board_holder,1)
+		landscape_view.show()
+	else:
+		landscape_view.hide()
+		for pair in range(2):
+			var seats := [0,1] if pair == 0 else [3,2]
+			for seat in seats:
+				cards[seat].reparent(player_rows[pair])
+			player_rows[pair].move_child(cards[seats[0]],0)
+			player_rows[pair].show()
+		board_holder.reparent(game_view)
+		game_view.move_child(board_holder,1)
 
 func label(text: String, font_size: int = 15, color: Color = Design.INK) -> Label:
 	var item := Label.new()
@@ -375,6 +423,7 @@ func build_ui() -> void:
 		row.alignment = BoxContainer.ALIGNMENT_BEGIN if pair == 0 else BoxContainer.ALIGNMENT_END
 		row.add_theme_constant_override("separation", 8)
 		game_view.add_child(row)
+		player_rows.append(row)
 		row.minimum_size_changed.connect(func(): _safe_area.call_deferred())
 		for slot in range(2):
 			if slot == 1:
@@ -400,6 +449,24 @@ func build_ui() -> void:
 			board_holder.add_child(board)
 			board.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			board.token_pressed.connect(func(id: String): send({"type":"MOVE_TOKEN", "tokenId":id}))
+	landscape_view = HBoxContainer.new()
+	landscape_view.add_theme_constant_override("separation",12)
+	landscape_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	game_view.add_child(landscape_view)
+	for side in range(2):
+		var profiles := VBoxContainer.new()
+		profiles.add_theme_constant_override("separation",8)
+		profiles.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		var spacer := Control.new()
+		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		profiles.add_child(spacer)
+		landscape_view.add_child(profiles)
+		if side == 0:
+			left_profiles = profiles
+		else:
+			right_profiles = profiles
+	landscape_view.hide()
 	notice = label("", 12, Design.MUTED)
 	# Turn messages must not grow/shrink the available board area.
 	notice.custom_minimum_size.y = 34
@@ -481,7 +548,18 @@ func build_dialogs() -> void:
 			config.set_value("feedback",kind,value)
 			config.save("user://preferences.cfg")
 		)
-		settings.add_child(toggle)
+		if kind == "sound":
+			var sound_row := HBoxContainer.new()
+			sound_row.add_theme_constant_override("separation",8)
+			toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			sound_row.add_child(toggle)
+			var preview := button("Test",func(): feedback.cue("step"))
+			preview.name = "PreviewPawnSound"
+			preview.tooltip_text = "Preview pawn sound"
+			sound_row.add_child(preview)
+			settings.add_child(sound_row)
+		else:
+			settings.add_child(toggle)
 	media_status = label("Camera and voice are not configured in this migration build.", 13, Design.MUTED)
 	settings.add_child(media_status)
 	settings.add_child(button("Retry server connection", func():
@@ -815,6 +893,13 @@ func present_event(event: Dictionary) -> void:
 			if awaiting_move_state:
 				awaiting_move_state = false
 				presenting = false
+		"TURN_SKIPPED":
+			if int(event.get("version",-1)) <= latest_version:
+				return
+			pending = false
+			presenting = false
+			awaiting_move_state = false
+			notice.text = "No clash-free dice value. Turn passed."
 		"DICE_ROLLED":
 			presenting = true
 			pending = false
@@ -918,7 +1003,10 @@ func refresh_controls() -> void:
 	restart_button.disabled = not online or pending or presenting or players.size() < 2
 	start_button.visible = not players.is_empty() and players[0].id == self_id
 	start_button.disabled = not online or pending or players.size() < 2
-	var can_act := online and not pending and not presenting and (turn_deadline_ticks == 0 or Time.get_ticks_msec() < turn_deadline_ticks)
+	# Server deadlines include animation time. Reduced-motion clients must
+	# also wait until that lead-in ends before enabling the next input.
+	var phase_ready := turn_deadline_ticks == 0 or Time.get_ticks_msec() >= turn_deadline_ticks-turn_duration_ms
+	var can_act := online and not pending and not presenting and phase_ready and (turn_deadline_ticks == 0 or Time.get_ticks_msec() < turn_deadline_ticks)
 	board.enabled = can_act
 	for pawn in board.pawns.values():
 		pawn.selection_enabled = can_act

@@ -153,6 +153,21 @@ func run() -> void:
 	for client in clients:
 		check(client.game.phase == "rolling" and client.game.currentPlayer == "a", "Timeout move preserves the six bonus turn")
 		check(client.cards[0].status_label.text == "0:30", "Next roll gets a fresh 30-second clock after landing")
+	var blocked := fixture(50,2)
+	blocked.tokens[1].position = 3
+	blocked.tokens[2].position = 6
+	blocked.tokens[3].position = 8
+	var passed := blocked.duplicate(true)
+	passed.version = 51
+	passed.currentPlayer = "b"
+	for client in clients:
+		client._receive(state_event(blocked))
+		client.pending = true
+		var voice_before: int = client.feedback.next_voice
+		client._receive({"type":"TURN_SKIPPED","playerId":"a","reason":"friendly_occupancy","version":51})
+		client._receive(state_event(passed))
+		check(not client.pending and not client.presenting and client.game.currentPlayer == "b","An entirely blocked roll passes cleanly on both clients")
+		check(client.notice.text.contains("Turn passed") and not client.cards[0].dice.rolling and client.feedback.next_voice == voice_before,"Blocked rolls explain the pass without animating or sounding an invalid die")
 	for client in clients:
 		check(client.feedback.samples["step"].get_length() > 0.10 and client.feedback.samples["step"].get_length() < 0.24, "Hop sound ends before the next cell landing")
 		client.feedback.sound_enabled = false

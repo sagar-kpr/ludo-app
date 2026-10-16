@@ -33,7 +33,8 @@ func synthesize(kind: String) -> AudioStreamWAV:
 		if kind == "step":
 			# A gently damped wooden tap: fixed pitches, rounded attack and
 			# a short tail keep repeated steps soft and free of a squeaky slide.
-			wave = sin(TAU*280.0*t)*0.70*exp(-t*24.0) + sin(TAU*620.0*t)*0.13*exp(-t*60.0)
+			# Midrange harmonics remain audible on small/filtered laptop speakers.
+			wave = sin(TAU*420.0*t)*0.62*exp(-t*24.0) + sin(TAU*840.0*t)*0.22*exp(-t*45.0)
 		elif kind == "sticker_hit":
 			wave = sin(TAU*(95-t*220)*t)*exp(-t*30)+sin(t*11003)*exp(-t*90)*0.4
 		elif kind == "sticker_cheer":

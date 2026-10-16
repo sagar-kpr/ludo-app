@@ -47,11 +47,12 @@ describe('same-player occupancy and exact finishing', () => {
     expect(autoMoveToken(state)?.id).toBe('0-1');
     for (const random of [0, 0.5, 0.99999]) expect(turnTimeoutAction(state, () => random)).toEqual({ type: 'move', tokenId: '0-1' });
   });
-  it('passes when the only unfinished pawns cannot land in the home lane', () => {
+  it('excludes a home-lane clash before rolling and still blocks that move directly', () => {
     const state = fixture(0, [HOME - 3, HOME - 1, HOME, HOME], 2);
     const rolled = rollDice({ ...state, phase: 'rolling', dice: null }, () => 1 / 6);
-    expect(rolled.dice).toBeNull();
-    expect(rolled.currentPlayer).toBe('1');
+    expect(rolled.dice).not.toBe(2);
+    expect(rolled.currentPlayer).toBe('0');
+    expect(rolled.phase).toBe('moving');
     expect(autoMoveToken(state)).toBeUndefined();
     expect(turnTimeoutAction(state)?.type).toBe('pass');
   });

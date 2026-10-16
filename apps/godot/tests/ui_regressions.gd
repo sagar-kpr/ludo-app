@@ -30,7 +30,7 @@ func run() -> void:
 		for index in range(4):
 			tokens.append({"id": id + "-" + str(index), "color": color, "position": 0})
 	client._receive({"type": "STATE", "roomCode": "TEST", "state": {"version": 1, "players": players, "tokens": tokens, "currentPlayer": "0", "phase": "rolling", "dice": null, "finishOrder": []}})
-	for viewport_size in [Vector2i(420,860), Vector2i(764,815), Vector2i(390,844), Vector2i(320,740), Vector2i(1440,900)]:
+	for viewport_size in [Vector2i(420,860), Vector2i(764,815), Vector2i(390,844), Vector2i(320,740), Vector2i(1440,900), Vector2i(1366,600), Vector2i(1920,507), Vector2i(844,390), Vector2i(640,360), Vector2i(390,844)]:
 		root.content_scale_size = viewport_size
 		root.size = viewport_size
 		client._safe_area()
@@ -50,9 +50,13 @@ func run() -> void:
 		check(not board_rect.intersects(red) and not board_rect.intersects(blue),"Player rows never overlap the play area")
 		check(client.get_viewport_rect().encloses(board_rect),"Board fits the available viewport")
 		check(board_rect.size.y <= client.board.preferred_height(board_rect.size.x)+1,"Printed board uses the available height")
-		var top_row: Rect2 = client.game_view.get_child(0).get_global_rect()
-		var bottom_row: Rect2 = client.game_view.get_child(2).get_global_rect()
-		check(absf(board_rect.position.y-top_row.end.y-(bottom_row.position.y-board_rect.end.y)) <= 2,"Visible board and player rows have balanced space at %s (above %.2f, below %.2f)" % [viewport_size,board_rect.position.y-top_row.end.y,bottom_row.position.y-board_rect.end.y])
+		if client.using_landscape:
+			check(red.end.x <= board_rect.position.x and green.position.x >= board_rect.end.x,"Wide windows place profiles beside the board")
+			check(board_rect.size.y >= client.cards[0].size.y*1.5,"Short desktop windows keep the board larger than the profile cards")
+		else:
+			var top_row: Rect2 = client.player_rows[0].get_global_rect()
+			var bottom_row: Rect2 = client.player_rows[1].get_global_rect()
+			check(absf(board_rect.position.y-top_row.end.y-(bottom_row.position.y-board_rect.end.y)) <= 2,"Visible board and player rows keep balanced spacing")
 		for card in client.cards:
 			check(client.get_viewport_rect().encloses(card.get_global_rect()),"Profile and actions fit even on narrow screens")
 			check(card.avatar.global_position.y-card.name_label.get_global_rect().end.y >= 4,"Player name has breathing room above the avatar")

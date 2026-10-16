@@ -17,6 +17,15 @@ export function diceSidesForRoll(state: GameState): 5 | 6 {
   return (state.consecutiveSixes?.[state.currentPlayer] ?? 0) >= 2 ? 5 : 6;
 }
 
+// A face is excluded if any otherwise eligible pawn would land on a friendly
+// pawn outside a safe star. Base entry, exact finishes and passing are unchanged.
+export function diceValuesForRoll(state: GameState): number[] {
+  const color = state.players.find(player => player.id === state.currentPlayer)?.color;
+  const own = state.tokens.filter(token => token.color === color);
+  return Array.from({ length: diceSidesForRoll(state) }, (_, index) => index+1)
+    .filter(value => !own.some(token => canMove(token, value) && !canMove(token, value, state.tokens)));
+}
+
 export function rollDice(state: GameState, random = Math.random): GameState {
   if (state.phase !== 'rolling') return state;
   // Older/recovered rooms may contain terminal pawns without a ranking entry.
@@ -30,7 +39,14 @@ export function rollDice(state: GameState, random = Math.random): GameState {
   if (finishOrder.includes(state.currentPlayer)) {
     return { ...ranked, currentPlayer: nextUnfinishedPlayer(ranked), dice: null, version: state.version + 1 };
   }
-  const dice = Math.floor(random() * diceSidesForRoll(state)) + 1;
+  const values = diceValuesForRoll(ranked);
+  if (!values.length) {
+    // No die was rolled: pass without inventing a forbidden face or changing
+    // the player's six streak. A later turn can resume after the board changes.
+    return { ...ranked, dice: null, phase: 'rolling', currentPlayer: nextUnfinishedPlayer(ranked), version: state.version + 1 };
+  }
+  const bucket = Math.max(0, Math.min(values.length-1, Math.floor(random()*values.length)));
+  const dice = values[bucket];
   const consecutiveSixes = { ...state.consecutiveSixes,
     [state.currentPlayer]: dice === 6 ? (state.consecutiveSixes?.[state.currentPlayer] ?? 0) + 1 : 0 };
   const color = state.players.find((p) => p.id === state.currentPlayer)?.color;
