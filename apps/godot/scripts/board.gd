@@ -25,6 +25,7 @@ var rank_labels: Dictionary = {}
 var departure_labels: Dictionary = {}
 var trails: Array[MeshInstance3D] = []
 const TRAIL_POOL_SIZE := 16
+const FRAMING_WIDTH := 16.0
 var trail_pool: Array[MeshInstance3D] = []
 var trail_fades: Dictionary = {}
 var trail_texture: GradientTexture2D
@@ -75,26 +76,48 @@ func _ready() -> void:
 	make_trail_pool()
 	_fit_camera()
 
+func projected_vertical_bounds() -> Vector2:
+	# Include the printed frame shadow and the pins at their highest idle bounce.
+	var up := camera.global_basis.y
+	var bottom := INF
+	var top := -INF
+	for x in [-7.85,7.85]:
+		for z in [-7.85,7.85]:
+			bottom = minf(bottom,up.dot(Vector3(x,0.20,z)))
+			for y in [0.0,0.5]:
+				top = maxf(top,up.dot(Vector3(x,y,z)))
+	for z in [-7.21,7.21]:
+		top = maxf(top,up.dot(Vector3(0,0.46,z))+1.66)
+	return Vector2(bottom,top)
+
+func preferred_height(width: float) -> float:
+	var bounds := projected_vertical_bounds()
+	return width*(bounds.y-bounds.x+0.25)/FRAMING_WIDTH
+
+func top_headroom_fraction() -> float:
+	var bounds := projected_vertical_bounds()
+	var board_center := camera.global_basis.y.dot(Vector3(0,0.20,0))
+	return maxf(0.0,(bounds.x+bounds.y-2.0*board_center)/(bounds.y-bounds.x+0.25))
+
+func printed_rect() -> Rect2:
+	var rect := Rect2(camera.unproject_position(Vector3(-7.5,0.20,-7.5)),Vector2.ZERO)
+	for x in [-7.5,7.5]:
+		for z in [-7.5,7.5]:
+			rect = rect.expand(camera.unproject_position(Vector3(x,0.20,z)))
+	return rect
+
+func _has_point(point: Vector2) -> bool:
+	# Transparent pawn headroom can extend behind the upper toolbar. Let
+	# those buttons receive clicks while retaining full-height pawn picking.
+	return camera != null and (printed_rect().has_point(point) or (enabled and not token_at_screen(point).is_empty()))
+
 func _fit_camera() -> void:
 	if camera and size.x > 0:
-		# Fit the projected rail AND tall pins, including stack offsets, their
-		# idle bounce and movement hop. Width-only fitting clips the top track
-		# on short screens and lets pins spill behind the profile cards.
-		var up := camera.global_basis.y
-		var bottom := INF
-		var top := -INF
-		for x in [-8.1,8.1]:
-			for z in [-8.1,8.1]:
-				var rail_height := up.dot(Vector3(x,-0.8,z))
-				bottom = minf(bottom,rail_height)
-				for y in [0.0,0.5]:
-					top = maxf(top,up.dot(Vector3(x,y,z)))
-		for z in [-7.25,7.25]:
-			top = maxf(top,up.dot(Vector3(0,0.9,z))+1.72)
-		var center := up*((top+bottom)*0.5)
+		var bounds := projected_vertical_bounds()
+		var center := camera.global_basis.y*((bounds.y+bounds.x)*0.5)
 		camera.position = Vector3(0,30,5)+center
 		camera.keep_aspect = Camera3D.KEEP_WIDTH
-		camera.size = maxf(16.3,(top-bottom+0.25)*size.x/maxf(size.y,1.0))
+		camera.size = maxf(FRAMING_WIDTH,(bounds.y-bounds.x+0.25)*size.x/maxf(size.y,1.0))
 
 func make_board() -> void:
 	# Render Theme/StyleBoxFlat/GradientTexture2D artwork once. A single unlit

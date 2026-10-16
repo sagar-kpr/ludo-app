@@ -23,10 +23,12 @@ func _draw() -> void:
 	var length := 0.0
 	for index in range(points.size()-1):
 		length += points[index].distance_to(points[index+1])
+	draw_polyline(points,Color(timer_color,0.10),1.0,true)
+	var ink := Color(timer_color.lightened(0.12),0.55)
 	var remaining := length*clampf(timer_fraction,0,1)
 	for index in range(points.size()-1):
 		var segment := points[index].distance_to(points[index+1])
 		if remaining <= 0:
 			break
-		draw_line(points[index],points[index].lerp(points[index+1],minf(1,remaining/maxf(segment,0.001))),timer_color,2.0,true)
+		draw_line(points[index],points[index].lerp(points[index+1],minf(1,remaining/maxf(segment,0.001))),ink,1.0,true)
 		remaining -= segment

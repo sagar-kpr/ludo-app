@@ -47,7 +47,7 @@ func run() -> void:
 			var sound = client.feedback
 			var voice = sound.voices[(sound.next_voice+sound.voices.size()-1)%sound.voices.size()]
 			check(sound.last_cue == "step" and voice.stream == sound.samples["step"] and voice.playing and voice.get_playback_position() < 0.06, "Every landing starts a fresh hop sound on actor and observer")
-			check(voice.volume_db >= -12.0, "Hop sound remains audible alongside the dice")
+			check(voice.volume_db >= -20.0 and voice.volume_db <= -15.0, "Movement tap stays softer than dice and capture sounds")
 		)
 	actor.self_id = "a"
 	observer.self_id = "b"

@@ -55,6 +55,7 @@ func run() -> void:
 	await create_timer(0.4).timeout
 	await screenshot("leave-smoke")
 	check(friend.board.pawns[departed_id+"-0"].get_node("PinVisual/PinBody").material_override.get_shader_parameter("exit_amount") > 0,"Pawn dissolves into a shadow")
+	check(friend.board.pawns[departed_id+"-0"].base_visual.get_children().all(func(mesh): return mesh.material_override.get_shader_parameter("exit_amount") > 0),"Silver foot ring dissolves together with the white pin")
 	check(await wait_until(func(): return host.home.visible and friend.game.players.size() == 2),"Leaving player returns home after animation")
 	check(host.room_code.is_empty() and host.board.pawns.is_empty(),"Leaving player clears table")
 	check(friend.game.currentPlayer == friend.self_id,"Next remaining player receives turn")

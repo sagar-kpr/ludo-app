@@ -20,6 +20,7 @@ func run() -> void:
 	client.network.disconnect_server()
 	client.network.set_process(false)
 	client.online = true
+	client.self_id = "0"
 	var players: Array = []
 	var tokens: Array = []
 	for seat in range(4):
@@ -29,7 +30,8 @@ func run() -> void:
 		for index in range(4):
 			tokens.append({"id": id + "-" + str(index), "color": color, "position": 0})
 	client._receive({"type": "STATE", "roomCode": "TEST", "state": {"version": 1, "players": players, "tokens": tokens, "currentPlayer": "0", "phase": "rolling", "dice": null, "finishOrder": []}})
-	for viewport_size in [Vector2i(420,860), Vector2i(764,815), Vector2i(390,844)]:
+	for viewport_size in [Vector2i(420,860), Vector2i(764,815), Vector2i(390,844), Vector2i(320,740), Vector2i(1440,900)]:
+		root.content_scale_size = viewport_size
 		root.size = viewport_size
 		client._safe_area()
 		for frame in range(5):
@@ -42,12 +44,34 @@ func run() -> void:
 		check(blue.end.x <= yellow.position.x, "Blue and yellow cards stay on opposite sides")
 		check(absf(red.position.x-blue.position.x) < 1 and absf(green.end.x-yellow.end.x) < 1, "Both rows align symmetrically")
 		check(red.position.y < blue.position.y, "Cards keep their matching board corners")
+		var board_rect: Rect2 = client.board.printed_rect()
+		board_rect.position += client.board.global_position
+		check(absf(board_rect.get_center().x-client.get_viewport_rect().get_center().x) <= 1.0,"Board stays horizontally centered at %s (offset %.2f)" % [viewport_size,board_rect.get_center().x-client.get_viewport_rect().get_center().x])
+		check(not board_rect.intersects(red) and not board_rect.intersects(blue),"Player rows never overlap the play area")
+		check(client.get_viewport_rect().encloses(board_rect),"Board fits the available viewport")
+		check(board_rect.size.y <= client.board.preferred_height(board_rect.size.x)+1,"Printed board uses the available height")
+		var top_row: Rect2 = client.game_view.get_child(0).get_global_rect()
+		var bottom_row: Rect2 = client.game_view.get_child(2).get_global_rect()
+		check(absf(board_rect.position.y-top_row.end.y-(bottom_row.position.y-board_rect.end.y)) <= 2,"Visible board and player rows have balanced space at %s (above %.2f, below %.2f)" % [viewport_size,board_rect.position.y-top_row.end.y,bottom_row.position.y-board_rect.end.y])
 		for card in client.cards:
+			check(client.get_viewport_rect().encloses(card.get_global_rect()),"Profile and actions fit even on narrow screens")
+			check(card.avatar.global_position.y-card.name_label.get_global_rect().end.y >= 4,"Player name has breathing room above the avatar")
+			check(card.panel.get_global_rect().end.y-card.lives.get_global_rect().end.y >= 10,"Life dots stay clear of the timer path")
+			var frame_style: StyleBoxFlat = card.panel.get_theme_stylebox("panel")
+			check(frame_style.border_width_left == 1,"Profile border remains thin for every color")
+			if card.roll.visible:
+				check(card.roll.global_position.x-card.avatar.get_global_rect().end.x >= 12,"Avatar and dice have a distinct gap")
+				check(card.avatar.size.y > card.roll.size.y and card.roll.size.y >= 48,"Avatar remains taller than the dice with a usable roll target")
 			check(card.lives.remaining == 5,"Every player starts with five filled life dots")
 			check(is_equal_approx(card.lives.size.x,card.avatar.size.x),"Five dots span exactly the avatar width")
 			check(card.lives.global_position.y >= card.avatar.get_global_rect().end.y+4,"Life dots sit below the portrait")
 			check(is_equal_approx(card.lives.global_position.x,card.avatar.global_position.x),"Life dots align with the avatar")
 			check(card.lives.accent == client.Design.COLORS[client.BoardMath.COLORS[int(card.player_id)]],"Life dots use the player's board color")
+	var emoji_style: StyleBoxFlat = client.cards[1].gift.get_theme_stylebox("normal")
+	var chat_style: StyleBoxFlat = client.cards[0].chat.get_theme_stylebox("normal")
+	check(emoji_style.bg_color == chat_style.bg_color and emoji_style.border_color == chat_style.border_color,"Emoji, chat and camera buttons share the same theme")
+	var chat_center: Vector2 = client.cards[0].chat.get_global_rect().get_center()-client.board.global_position
+	check(not client.board._has_point(chat_center),"Board headroom cannot intercept the profile toolbar")
 	client.game.timeoutLives = {"0":3,"1":1,"2":5,"3":0}
 	client.refresh_controls()
 	for seat in range(4):

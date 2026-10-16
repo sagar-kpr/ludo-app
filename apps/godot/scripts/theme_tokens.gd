@@ -2,10 +2,10 @@ extends Theme
 
 # Serialized in theme_tokens.tres. Wire identifiers are deliberately unchanged.
 @export_group("Player palette")
-@export var red := Color("d93a2f")
-@export var green := Color("3f9f4f")
-@export var blue := Color("4fa3e8")
-@export var yellow := Color("f9d342")
+@export var red := Color("f52e36")
+@export var green := Color("08bc53")
+@export var blue := Color("1683f5")
+@export var yellow := Color("ffd21c")
 
 @export_group("Board ink")
 @export var cell_white := Color("ffffff")
@@ -16,10 +16,10 @@ extends Theme
 @export_range(1.0, 4.0, 0.1) var symbol_width := 2.5
 
 @export_group("Board gradients")
-@export_range(0.0, 0.3, 0.01) var yard_highlight := 0.10
-@export_range(0.0, 0.3, 0.01) var yard_shade := 0.06
-@export_range(0.0, 0.3, 0.01) var center_highlight := 0.18
-@export_range(0.0, 0.3, 0.01) var center_shade := 0.06
+@export_range(0.0, 0.3, 0.01) var yard_highlight := 0.14
+@export_range(0.0, 0.3, 0.01) var yard_shade := 0.24
+@export_range(0.0, 0.3, 0.01) var center_highlight := 0.20
+@export_range(0.0, 0.3, 0.01) var center_shade := 0.22
 
 @export_group("Pawn step shadows")
 @export_range(0.0, 1.0, 0.01) var pawn_shadow_opacity := 0.68

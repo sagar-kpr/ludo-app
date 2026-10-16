@@ -10,6 +10,7 @@ const ORIGIN := Vector2(32, 32)
 const CORNERS := [Vector2(0, 0), Vector2(9, 0), Vector2(9, 9), Vector2(0, 9)]
 var yard_gradients: Array[GradientTexture2D] = []
 var colors: Dictionary = Tokens.player_colors()
+var cell_gradients: Dictionary = {}
 
 func _ready() -> void:
 	theme = Tokens
@@ -18,7 +19,9 @@ func _ready() -> void:
 	for key in BoardMath.COLORS:
 		var color: Color = colors[key]
 		var gradient := Gradient.new()
-		gradient.colors = PackedColorArray([color.lightened(Tokens.yard_highlight), color.darkened(Tokens.yard_shade)])
+		gradient.offsets = PackedFloat32Array([0.0, 0.40, 1.0])
+		var shade: Color = Color("e8ac08") if color == Tokens.yellow else color.darkened(Tokens.yard_shade)
+		gradient.colors = PackedColorArray([color.lightened(Tokens.yard_highlight), color, shade])
 		var texture := GradientTexture2D.new()
 		texture.gradient = gradient
 		texture.width = 128
@@ -26,6 +29,19 @@ func _ready() -> void:
 		texture.fill_from = Vector2.ZERO
 		texture.fill_to = Vector2(0.35, 1.0)
 		yard_gradients.append(texture)
+	# Small cached textures give every tile a lit face without per-frame work.
+	for color in [Tokens.cell_white, Tokens.red, Tokens.green, Tokens.blue, Tokens.yellow]:
+		var gradient := Gradient.new()
+		gradient.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+		var shade: Color = Color("e8ac08") if color == Tokens.yellow else color.darkened(0.18 if color != Tokens.cell_white else 0.06)
+		gradient.colors = PackedColorArray([color.lightened(0.16), color, shade])
+		var texture := GradientTexture2D.new()
+		texture.gradient = gradient
+		texture.width = 64
+		texture.height = 64
+		texture.fill_from = Vector2.ZERO
+		texture.fill_to = Vector2(0.35,1.0)
+		cell_gradients[color] = texture
 	queue_redraw()
 
 func _draw() -> void:
@@ -98,7 +114,14 @@ func _draw_track() -> void:
 	for row in range(15):
 		for col in range(15):
 			if _is_track(row, col):
-				draw_rect(Rect2(ORIGIN + Vector2(col, row) * CELL, Vector2.ONE * CELL), cell_color(row, col))
+				var rect := Rect2(ORIGIN + Vector2(col, row) * CELL, Vector2.ONE * CELL)
+				var color := cell_color(row, col)
+				draw_texture_rect(cell_gradients[color],rect,false)
+				# Inset highlights and a lower lip read as a shallow raised tile.
+				var inset := rect.grow(-2.0)
+				draw_line(inset.position,inset.position+Vector2(inset.size.x,0),Color(1,1,1,0.42),2.0,true)
+				draw_line(inset.position,inset.position+Vector2(0,inset.size.y),Color(1,1,1,0.23),2.0,true)
+				draw_line(inset.position+Vector2(0,inset.size.y),inset.end,Color(0.02,0.04,0.10,0.22),3.0,true)
 	for row in range(15):
 		for col in range(15):
 			if not _is_track(row, col):

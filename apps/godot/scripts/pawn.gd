@@ -9,6 +9,7 @@ var highlight := false
 var reduced_motion := false
 var resting := Vector3.ZERO
 var visual: Node3D
+var base_visual: Node3D
 var moving := false
 var selection_enabled := true
 var glow_floor: MeshInstance3D
@@ -19,7 +20,7 @@ var departing := false
 var finish_badge: Control
 
 func lacquer(color: Color) -> ShaderMaterial:
-	# Soft enamel shading keeps coloured faces bright while showing their curve.
+	# Satin enamel uses one soft light and finish for every player color.
 	var shader := Shader.new()
 	shader.code = """
 	shader_type spatial;
@@ -41,11 +42,11 @@ func lacquer(color: Color) -> ShaderMaterial:
 		vec3 n = normalize(world_normal+world_tangent*local_point.x*face_curvature);
 		vec3 v = normalize(CAMERA_POSITION_WORLD-world_position);
 		vec3 key = normalize(vec3(-0.65,1.0,0.65));
-		float highlight = pow(max(dot(n,normalize(key+v)),0.0),34.0);
-		float softbox = pow(max(dot(n,normalize(vec3(-0.8,0.6,0.5)+v)),0.0),9.0);
+		float highlight = pow(max(dot(n,normalize(key+v)),0.0),18.0);
+		float softbox = pow(max(dot(n,normalize(vec3(-0.8,0.6,0.5)+v)),0.0),7.0);
 		float rim = pow(1.0-max(dot(n,v),0.0),3.0)*max(n.y,0.0);
-		float shine = clamp(highlight*0.24+softbox*0.08+rim*0.07,0.0,0.35);
-		float light = 0.80+0.20*max(dot(n,key),0.0);
+		float shine = clamp(highlight*0.12+softbox*0.06+rim*0.04,0.0,0.20);
+		float light = 0.72+0.28*max(dot(n,key),0.0);
 		ALBEDO = mix(mix(tint.rgb*light,vec3(1.0),shine),vec3(0.12,0.15,0.20),exit_amount);
 		if (exit_amount > fract(sin(dot(FRAGCOORD.xy,vec2(12.9898,78.233)))*43758.5453)) discard;
 	}
@@ -92,6 +93,33 @@ func configure(id: String, color: Color) -> void:
 	cell_shadow = part(shadow_mesh,Vector3(0,0.005,0),shadow_material)
 	cell_shadow.name = "CellShadow"
 	cell_shadow.rotation.x = -PI/2
+	# A permanent silver hoop replaces the solid foot; its center stays open.
+	base_visual = Node3D.new()
+	base_visual.name = "SilverBase"
+	add_child(base_visual)
+	var foot := TorusMesh.new()
+	foot.inner_radius = 0.29
+	foot.outer_radius = 0.40
+	foot.rings = 48
+	foot.ring_segments = 12
+	var silver_shader := Shader.new()
+	silver_shader.code = """
+	shader_type spatial;
+	render_mode diffuse_burley, specular_schlick_ggx;
+	uniform float exit_amount = 0.0;
+	void fragment() {
+		if (exit_amount > fract(sin(dot(FRAGCOORD.xy,vec2(12.9898,78.233)))*43758.5453)) discard;
+		ALBEDO = vec3(0.72,0.78,0.86);
+		METALLIC = 0.82;
+		ROUGHNESS = 0.22;
+		SPECULAR = 0.75;
+		EMISSION = vec3(0.12,0.14,0.18);
+	}
+	"""
+	var silver := ShaderMaterial.new()
+	silver.shader = silver_shader
+	var foot_mesh := part(foot,Vector3(0,0.065,0),silver)
+	foot_mesh.reparent(base_visual,false)
 	visual = Node3D.new()
 	visual.name = "PinVisual"
 	# Face the orthographic board camera; the pin tip remains on its real cell.
@@ -101,11 +129,12 @@ func configure(id: String, color: Color) -> void:
 	for step in range(33):
 		var angle := -PI/6.0 + step*(4.0*PI/3.0)/32.0
 		outline.append(Vector2(cos(angle)*0.43,0.98+sin(angle)*0.43))
-	var shell := part(Geometry.beveled_pin(outline,0.38,0.055),Vector3.ZERO,lacquer(Color("87958e")))
+	var shell := part(Geometry.beveled_pin(outline,0.38,0.055),Vector3.ZERO,lacquer(Color("596169")))
 	shell.name = "PinShell"
 	shell.reparent(visual,false)
 	var body := part(Geometry.beveled_pin(outline,0.32,0.06),Vector3(0,0.035,0.10),lacquer(Color("f5f7fa")))
 	body.name = "PinBody"
+	body.material_override.set_shader_parameter("face_curvature",0.85)
 	body.scale = Vector3(0.92,0.95,1.0)
 	body.reparent(visual,false)
 	var crown := SphereMesh.new()
@@ -118,11 +147,11 @@ func configure(id: String, color: Color) -> void:
 	dome.scale.z = 0.48
 	dome.reparent(visual,false)
 	var badge := CylinderMesh.new()
-	badge.top_radius = 0.32
-	badge.bottom_radius = 0.32
+	badge.top_radius = 0.30
+	badge.bottom_radius = 0.30
 	badge.height = 0.025
 	badge.radial_segments = 40
-	var center := part(badge,Vector3(0,0.98,0.40),lacquer(Color("f5f7f2")))
+	var center := part(badge,Vector3(0,0.98,0.40),lacquer(Color("46515b")))
 	center.name = "PinBadge"
 	center.rotation.x = PI/2.0
 	center.reparent(visual,false)
@@ -280,7 +309,7 @@ func vanish() -> void:
 		finish_badge.hide()
 	var tween := create_tween()
 	tween.tween_method(func(amount: float):
-		for mesh in visual.get_children():
+		for mesh in visual.get_children()+base_visual.get_children():
 			if mesh is MeshInstance3D:
 				if mesh.material_override is ShaderMaterial:
 					mesh.material_override.set_shader_parameter("exit_amount",amount)

@@ -14,6 +14,7 @@ var feedback
 var chat_bubbles
 var network
 var board
+var board_holder: MarginContainer
 var content: VBoxContainer
 var home: VBoxContainer
 var home_card: VBoxContainer
@@ -186,15 +187,28 @@ func _safe_area() -> void:
 	margin.add_theme_constant_override("margin_left",4)
 	margin.add_theme_constant_override("margin_right",4)
 	var available := get_viewport_rect().size
-	# Keep the profiles aligned with the square table on wide screens.
-	content.custom_minimum_size.x = minf(available.x - 8.0, maxf(400.0, available.y - 250.0)) if game_view.visible else minf(600.0, available.x - 24.0)
 	if is_instance_valid(home_card):
 		home_card.custom_minimum_size.y = maxf(420.0, available.y * 0.60)
-	if is_instance_valid(board):
-		# Keep profiles beside the visible board edges, with no blank viewport bands.
-		var rows: float = game_view.get_child(0).get_combined_minimum_size().y + game_view.get_child(2).get_combined_minimum_size().y
-		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + rows + inset_top + inset_bottom + 24
-		board.custom_minimum_size.y = maxf(80.0, available.y - chrome)
+	if game_view.visible and is_instance_valid(board):
+		var width_limit := available.x-8.0
+		for card in cards:
+			card.fit_width((width_limit-16.0)*0.5)
+		var top_row := game_view.get_child(0) as HBoxContainer
+		var bottom_row := game_view.get_child(2) as HBoxContainer
+		var rows := top_row.get_combined_minimum_size().y + bottom_row.get_combined_minimum_size().y
+		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + rows + inset_top + inset_bottom + content.get_theme_constant("separation")*2 + game_view.get_theme_constant("separation")*2
+		var height_limit := maxf(80.0,available.y-chrome)
+		var row_width := maxf(top_row.get_combined_minimum_size().x,bottom_row.get_combined_minimum_size().x)
+		# Use the same projected bounds as the camera: no guessed square size
+		# or oversized viewport bands between the board and its player rows.
+		var board_width := floorf(minf(width_limit,maxf(row_width,height_limit/(board.preferred_height(1.0)*(1.0-board.top_headroom_fraction())))))
+		content.custom_minimum_size.x = board_width
+		var headroom: float = board.top_headroom_fraction()
+		var render_height := floorf(minf(height_limit/(1.0-headroom),board.preferred_height(board_width)))
+		board_holder.add_theme_constant_override("margin_top",-roundi(render_height*headroom))
+		board.custom_minimum_size.y = render_height
+	else:
+		content.custom_minimum_size.x = minf(600.0,available.x-24.0)
 
 func label(text: String, font_size: int = 15, color: Color = Design.INK) -> Label:
 	var item := Label.new()
@@ -351,7 +365,7 @@ func build_ui() -> void:
 	lobby.add_child(label("The host can start when at least 2 players have joined.\nEveryone uses the same room code.", 14, Design.MUTED))
 	game_view = VBoxContainer.new()
 	game_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	game_view.add_theme_constant_override("separation", 4)
+	game_view.add_theme_constant_override("separation", 8)
 	game_view.alignment = BoxContainer.ALIGNMENT_CENTER
 	game_view.hide()
 	content.add_child(game_view)
@@ -361,6 +375,7 @@ func build_ui() -> void:
 		row.alignment = BoxContainer.ALIGNMENT_BEGIN if pair == 0 else BoxContainer.ALIGNMENT_END
 		row.add_theme_constant_override("separation", 8)
 		game_view.add_child(row)
+		row.minimum_size_changed.connect(func(): _safe_area.call_deferred())
 		for slot in range(2):
 			if slot == 1:
 				var spacer := Control.new()
@@ -379,7 +394,10 @@ func build_ui() -> void:
 		if pair == 0:
 			board = Board.new()
 			board.reduced_motion = reduced_motion
-			game_view.add_child(board)
+			board_holder = MarginContainer.new()
+			board_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			game_view.add_child(board_holder)
+			board_holder.add_child(board)
 			board.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			board.token_pressed.connect(func(id: String): send({"type":"MOVE_TOKEN", "tokenId":id}))
 	notice = label("", 12, Design.MUTED)

@@ -12,12 +12,12 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(40,28)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	for state in ["normal","hover","pressed","disabled"]:
-		var fill := Color("ffd034") if kind == "emoji" else Color("193d70")
+		var fill := Color("193d70")
 		if state == "hover":
 			fill = fill.lightened(0.12)
 		elif state == "pressed":
 			fill = fill.darkened(0.15)
-		var style := Design.surface(fill,10,Color("dfaf19") if kind == "emoji" else Color("386ba8"))
+		var style := Design.surface(fill,10,Color("386ba8"))
 		style.shadow_size = 0
 		style.content_margin_left = 0
 		style.content_margin_right = 0
@@ -29,7 +29,7 @@ func _ready() -> void:
 	add_theme_stylebox_override("focus",focus)
 
 func _draw() -> void:
-	var ink := Color("293449") if kind == "emoji" else Color("f4f8ff")
+	var ink := Color("f4f8ff")
 	if disabled:
 		ink.a = 0.45
 	draw_set_transform(size*0.5)
