@@ -4,8 +4,6 @@ signal glide_passed(point_index: int)
 
 const Design = preload("res://scripts/design.gd")
 const Geometry = preload("res://scripts/geometry.gd")
-const YARD_BOB := 0.16
-const YARD_PULSE := 0.03
 var token_id := ""
 var ring: MeshInstance3D
 var legal_move := false
@@ -21,7 +19,6 @@ var glow_floor: MeshInstance3D
 var cell_shadow: MeshInstance3D
 var token_color := Color.WHITE
 var completed := false
-var in_yard := false
 var departing := false
 var finish_badge: Control
 
@@ -261,9 +258,9 @@ func _process(delta: float) -> void:
 		glow_floor.visible = selected
 	if visual and not moving:
 		var loop := (1.0-cos(Time.get_ticks_msec()*TAU/1000.0))*0.5 if selected and not reduced_motion else 0.0
-		# Home rows have less vertical clearance; keep their selection motion restrained.
-		visual.position.y = loop*(YARD_BOB if in_yard else 0.43)
-		visual.scale = Vector3.ONE*(1.0+(YARD_PULSE if in_yard else 0.12)*loop)
+		# The tilted board camera projects this to roughly four logical pixels.
+		visual.position.y = loop*0.43
+		visual.scale = Vector3.ONE*(1.0+0.12*loop)
 
 func place_shadow() -> void:
 	if cell_shadow:

@@ -29,8 +29,6 @@ const TRAIL_POOL_SIZE := 16
 const FRAMING_WIDTH := 16.0
 # Bound the animated scene's render target; the static square art cache stays 1024px.
 const MAX_RENDER_EDGE := 1024
-# Home pins keep their existing dock centers, with clearance for the selection bounce.
-const YARD_PAWN_SCALE := 0.92
 var framing_width := FRAMING_WIDTH:
 	set(value):
 		if is_equal_approx(framing_width,value): return
@@ -133,9 +131,6 @@ func _has_point(point: Vector2) -> bool:
 func world_position(color: String, position: int, index: int) -> Vector3:
 	return BoardMath.world(color,position,index)
 
-func _pawn_display_scale(position: int) -> Vector3:
-	return Vector3.ONE*(YARD_PAWN_SCALE if position == 0 else 0.64 if position >= BoardMath.HOME else 1.0)
-
 func _fit_camera() -> void:
 	if camera and size.x > 0 and size.y > 0:
 		# Match physical screen pixels on dense phones instead of upscaling a
@@ -208,9 +203,8 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 		var pawn: Node3D = pawns[id]
 		pawn.reduced_motion = reduced_motion
 		pawn.position = world_position(str(token.color), int(token.position), index)
-		pawn.in_yard = int(token.position) == 0
 		var completed := int(token.position) >= BoardMath.HOME
-		pawn.scale = _pawn_display_scale(int(token.position))
+		pawn.scale = Vector3.ONE * (0.64 if completed else 1.0)
 		pawn.set_completed(completed)
 		if completed:
 			place_completion_check(pawn)
@@ -275,7 +269,7 @@ func layout_stacks(moving_id: String = "") -> void:
 		if not moving_id.is_empty():
 			var index := int(str(id).get_slice("-",str(id).get_slice_count("-")-1))
 			pawns[id].position = world_position(str(token.color),displayed,index)
-			pawns[id].scale = _pawn_display_scale(displayed)
+			pawns[id].scale = Vector3.ONE * (0.64 if displayed >= BoardMath.HOME else 1.0)
 		if displayed <= 0 or displayed >= BoardMath.HOME:
 			continue
 		var cell := BoardMath.coordinate(str(token.color),displayed,0)
@@ -424,7 +418,6 @@ func animate_move(event: Dictionary) -> void:
 	var duration := float(event.get("durationMs", steps*240)) / 1000.0
 	layout_stacks(id)
 	pawns[id].scale = Vector3.ONE
-	pawns[id].in_yard = false
 	leave_trail(pawns[id].position,BOARD_COLORS[token.color])
 	for step in range(steps):
 		var landing := finish if start == 0 else start + step + 1
@@ -471,8 +464,6 @@ func animate_capture(id: String) -> void:
 	pawn.glide_passed.connect(passed)
 	await pawn.glide_path(points,durations,reduced_motion)
 	pawn.glide_passed.disconnect(passed)
-	pawn.scale = _pawn_display_scale(0)
-	pawn.in_yard = true
 
 func reconcile_state(snapshot: Dictionary) -> void:
 	# A resync can arrive without its TOKEN_MOVED event. Animate the visible

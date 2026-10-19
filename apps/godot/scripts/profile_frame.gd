@@ -11,8 +11,8 @@ func _draw() -> void:
 	if timer_fraction < 0:
 		return
 	# Rounded timer path inside the one profile frame.
-	var inset := 2.5
-	var radius := 11.5
+	var inset := 4.0
+	var radius := 10.0
 	var points := PackedVector2Array()
 	var centers := [Vector2(size.x-inset-radius,inset+radius), Vector2(size.x-inset-radius,size.y-inset-radius), Vector2(inset+radius,size.y-inset-radius), Vector2(inset+radius,inset+radius)]
 	for corner in range(4):
@@ -24,7 +24,7 @@ func _draw() -> void:
 	for index in range(points.size()-1):
 		length += points[index].distance_to(points[index+1])
 	draw_polyline(points,Color(timer_color,0.10),1.0,true)
-	var ink := Color(timer_color.lerp(Color("c6d7e4"),0.40),0.42)
+	var ink := Color(timer_color.lightened(0.12),0.55)
 	var remaining := length*clampf(timer_fraction,0,1)
 	for index in range(points.size()-1):
 		var segment := points[index].distance_to(points[index+1])
