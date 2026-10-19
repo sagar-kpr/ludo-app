@@ -16,6 +16,20 @@ func check(condition: bool, message: String) -> void:
 		failures += 1
 		push_error(message)
 
+func home_pin_bounds(board: Control, pawn: Node3D) -> Rect2:
+	var bounds := Rect2()
+	var started := false
+	for child in pawn.visual.get_children()+pawn.base_visual.get_children():
+		if child is MeshInstance3D:
+			for corner in range(8):
+				var point: Vector2 = board.camera.unproject_position(child.to_global(child.mesh.get_aabb().get_endpoint(corner)))
+				if not started:
+					bounds = Rect2(point,Vector2.ZERO)
+					started = true
+				else:
+					bounds = bounds.expand(point)
+	return bounds
+
 func run() -> void:
 	var board := Board.new()
 	root.add_child(board)
@@ -43,6 +57,22 @@ func run() -> void:
 			state.tokens.append({"id": "%s-%d" % [BoardMath.COLORS[seat], index], "color": BoardMath.COLORS[seat], "position": 0})
 	board.apply_state(state, "local")
 	check(board.pawns.size() == 16, "All existing pawn instances remain supported")
+	# Neighboring home pins remain separate even at opposite selection phases.
+	for color in BoardMath.COLORS:
+		var bounds: Array[Rect2] = []
+		for index in range(4):
+			var pawn = board.pawns["%s-%d" % [color,index]]
+			pawn.set_process(false)
+			pawn.visual.position.y = pawn.YARD_BOB if index >= 2 else 0.0
+			pawn.visual.scale = Vector3.ONE*(1.0+pawn.YARD_PULSE if index >= 2 else 1.0)
+			bounds.append(home_pin_bounds(board,pawn))
+		for first in range(4):
+			for second in range(first+1,4):
+				check(not bounds[first].intersects(bounds[second]),"All four home token bodies and bases have clear spacing")
+		for index in range(4):
+			var pawn = board.pawns["%s-%d" % [color,index]]
+			pawn.set_process(true)
+			pawn._process(0)
 	for pawn in board.pawns.values():
 		pawn.place_shadow()
 		check(pawn.cell_shadow.visible and pawn.cell_shadow.material_override is StandardMaterial3D, "Every pawn has a permanent portable shadow")

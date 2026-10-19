@@ -30,7 +30,7 @@ func run() -> void:
 		for index in range(4):
 			tokens.append({"id": id + "-" + str(index), "color": color, "position": 0})
 	client._receive({"type": "STATE", "roomCode": "TEST", "state": {"version": 1, "players": players, "tokens": tokens, "currentPlayer": "0", "phase": "rolling", "dice": null, "finishOrder": []}})
-	for viewport_size in [Vector2i(420,860), Vector2i(764,815), Vector2i(390,844), Vector2i(320,740), Vector2i(1440,900), Vector2i(1366,600), Vector2i(1920,507), Vector2i(844,390), Vector2i(640,360), Vector2i(390,844)]:
+	for viewport_size in [Vector2i(420,860), Vector2i(764,815), Vector2i(390,844), Vector2i(320,740), Vector2i(360,640), Vector2i(375,667), Vector2i(393,852), Vector2i(412,915), Vector2i(430,932), Vector2i(1440,900), Vector2i(1366,600), Vector2i(1920,507), Vector2i(844,390), Vector2i(640,360), Vector2i(390,844)]:
 		root.content_scale_size = viewport_size
 		root.size = viewport_size
 		client._safe_area()

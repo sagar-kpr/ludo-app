@@ -93,11 +93,11 @@ func set_rank(rank: int) -> void:
 func _ready() -> void:
 	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	custom_minimum_size = Vector2(180,112)
-	add_theme_constant_override("separation",4)
+	add_theme_constant_override("separation",5)
 	panel = ProfileFrame.new()
 	add_child(panel)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation",5)
+	column.add_theme_constant_override("separation",7)
 	panel.add_child(column)
 	# Name above the media row leaves a genuinely usable camera square rather
 	# than squeezing the portrait between the name and the large dice.
@@ -117,7 +117,7 @@ func _ready() -> void:
 	row.add_theme_constant_override("separation", 14)
 	column.add_child(row)
 	var portrait_column := VBoxContainer.new()
-	portrait_column.add_theme_constant_override("separation",6)
+	portrait_column.add_theme_constant_override("separation",7)
 	portrait_column.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	row.add_child(portrait_column)
 	avatar = Avatar.new()
@@ -208,8 +208,8 @@ func fit_width(available_width: float, viewport_height: float = 860.0, mobile_po
 	media_row.add_theme_constant_override("separation",12 if compact or compact_height else 14)
 	if panel.has_theme_stylebox_override("panel"):
 		var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
-		style.content_margin_top = 6 if compact_height else 8
-		style.content_margin_bottom = 10 if compact_height else 13
+		style.content_margin_top = 8 if compact_height else 10
+		style.content_margin_bottom = 11 if compact_height else 13
 
 func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) -> void:
 	departed = bool(player.get("departed",false))
@@ -221,19 +221,21 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	panel.timer_color = accent
 	lives.accent = accent
 	lives.visible = not player.is_empty()
-	var style := Design.surface(Color("14263f"),16)
+	var highlighted := active and not departed
+	var style := Design.surface(Color("172c44") if highlighted else Color("14263d"),14)
 	style.set_border_width_all(1)
-	style.border_color = Color(accent,0.20) if active and not departed else Color("2a4059")
-	style.shadow_color = Color(accent,0.08) if active and not departed else Color(0.015,0.025,0.06,0.25)
-	style.shadow_size = 5 if active and not departed else 3
+	style.border_color = Color("496276") if highlighted else Color("2d4258")
+	style.shadow_color = Color(0.015,0.025,0.06,0.24 if highlighted else 0.18)
+	style.shadow_size = 5 if highlighted else 4
+	style.shadow_offset = Vector2(0,2)
 	style.content_margin_left = 10
 	style.content_margin_right = 10
-	style.content_margin_top = 6 if compact_height else 8
-	style.content_margin_bottom = 10 if compact_height else 13
+	style.content_margin_top = 8 if compact_height else 10
+	style.content_margin_bottom = 11 if compact_height else 13
 	panel.add_theme_stylebox_override("panel",style)
 	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
-	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))
-	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
+	status_label.add_theme_color_override("font_color",accent.lightened(0.45) if highlighted else Color("adc0d3"))
+	name_label.add_theme_color_override("font_color",Design.INK if highlighted or player.is_empty() else Color("e4edf6"))
 	roll.visible = active and not departed
 	invite.visible = player.is_empty()
 	chat.visible = own and not player.is_empty() and not departed
