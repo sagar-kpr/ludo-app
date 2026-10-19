@@ -22,7 +22,7 @@ func run() -> void:
 	board.size = Vector2(420, 420)
 	await process_frame
 	check(Tokens is Theme, "Single editable resource is a Godot Theme")
-	check(Tokens.red.to_html(false) == "f52e36" and Tokens.green.to_html(false) == "08bc53" and Tokens.blue.to_html(false) == "1683f5" and Tokens.yellow.to_html(false) == "ffd21c", "Vivid player palette remains consistent across the board and pawns")
+	check(Tokens.red.to_html(false) == "f2131b" and Tokens.green.to_html(false) == "00a64b" and Tokens.blue.to_html(false) == "23ace8" and Tokens.yellow.to_html(false) == "ffeb00", "Vivid player palette remains consistent across the board and pawns")
 	check(board.artwork_viewport.size == Vector2i(1024, 1024), "Board texture stays within the mobile texture budget")
 	check(board.artwork_viewport.disable_3d and board.artwork_viewport.gui_disable_input, "Art cache cannot render 3D or intercept input")
 	check(board.world.get_child_count() < 10, "Static board uses bounded scene complexity")

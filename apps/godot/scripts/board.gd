@@ -1,4 +1,4 @@
-extends SubViewportContainer
+extends Control
 
 signal token_pressed(token_id: String)
 signal step_landed(token_id: String)
@@ -27,6 +27,11 @@ var departure_labels: Dictionary = {}
 var trails: Array[MeshInstance3D] = []
 const TRAIL_POOL_SIZE := 16
 const FRAMING_WIDTH := 16.0
+var framing_width := FRAMING_WIDTH:
+	set(value):
+		if is_equal_approx(framing_width,value): return
+		framing_width = value
+		_fit_camera()
 const CAPTURE_STEP_MS := 64
 const CAPTURE_HOME_MS := 128
 var trail_pool: Array[MeshInstance3D] = []
@@ -34,7 +39,6 @@ var trail_fades: Dictionary = {}
 var trail_texture: GradientTexture2D
 
 func _ready() -> void:
-	stretch = true
 	clip_contents = true
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -90,37 +94,48 @@ func projected_vertical_bounds() -> Vector2:
 			for y in [0.0,0.5]:
 				top = maxf(top,up.dot(Vector3(x,y,z)))
 	for z in [-7.21,7.21]:
-		top = maxf(top,up.dot(Vector3(0,0.46,z))+1.66)
+		top = maxf(top,up.dot(Vector3(0,0.46,z))+1.85)
 	return Vector2(bottom,top)
 
 func preferred_height(width: float) -> float:
 	var bounds := projected_vertical_bounds()
-	return width*(bounds.y-bounds.x+0.25)/FRAMING_WIDTH
+	return width*(bounds.y-bounds.x+0.25)/framing_width
 
 func top_headroom_fraction() -> float:
 	var bounds := projected_vertical_bounds()
 	var board_center := camera.global_basis.y.dot(Vector3(0,0.20,0))
 	return maxf(0.0,(bounds.x+bounds.y-2.0*board_center)/(bounds.y-bounds.x+0.25))
 
+func display_point(render_point: Vector2) -> Vector2:
+	return render_point * size / Vector2(viewport.size)
+
+func _draw() -> void:
+	if is_instance_valid(viewport):
+		draw_texture_rect(viewport.get_texture(),Rect2(Vector2.ZERO,size),false)
+
 func printed_rect() -> Rect2:
 	var rect := Rect2(camera.unproject_position(Vector3(-7.5,0.20,-7.5)),Vector2.ZERO)
 	for x in [-7.5,7.5]:
 		for z in [-7.5,7.5]:
 			rect = rect.expand(camera.unproject_position(Vector3(x,0.20,z)))
-	return rect
+	return Rect2(display_point(rect.position),display_point(rect.size))
 
 func _has_point(point: Vector2) -> bool:
 	# Transparent pawn headroom can extend behind the upper toolbar. Let
 	# those buttons receive clicks while retaining full-height pawn picking.
 	return camera != null and (printed_rect().has_point(point) or (enabled and not token_at_screen(point).is_empty()))
 
+func world_position(color: String, position: int, index: int) -> Vector3:
+	return BoardMath.world(color,position,index)
+
 func _fit_camera() -> void:
-	if camera and size.x > 0:
+	if camera and size.x > 0 and size.y > 0:
+		viewport.size = Vector2i(maxi(1,roundi(size.x)),maxi(1,roundi(size.y)))
 		var bounds := projected_vertical_bounds()
-		var center := camera.global_basis.y*((bounds.y+bounds.x)*0.5)
-		camera.position = Vector3(0,30,5)+center
+		camera.position = Vector3(0,30,5)+camera.global_basis.y*((bounds.x+bounds.y)*0.5)
 		camera.keep_aspect = Camera3D.KEEP_WIDTH
-		camera.size = maxf(FRAMING_WIDTH,(bounds.y-bounds.x+0.25)*size.x/maxf(size.y,1.0))
+		camera.size = maxf(framing_width,(bounds.y-bounds.x+0.25)*viewport.size.x/viewport.size.y)
+		queue_redraw()
 
 func make_board() -> void:
 	# Render Theme/StyleBoxFlat/GradientTexture2D artwork once. A single unlit
@@ -178,7 +193,7 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 			pawns[id] = pawn
 		var pawn: Node3D = pawns[id]
 		pawn.reduced_motion = reduced_motion
-		pawn.position = BoardMath.world(str(token.color), int(token.position), index)
+		pawn.position = world_position(str(token.color), int(token.position), index)
 		var completed := int(token.position) >= BoardMath.HOME
 		pawn.scale = Vector3.ONE * (0.64 if completed else 1.0)
 		pawn.set_completed(completed)
@@ -237,7 +252,7 @@ func layout_stacks(moving_id: String = "") -> void:
 			continue
 		if not moving_id.is_empty():
 			var index := int(str(id).get_slice("-",str(id).get_slice_count("-")-1))
-			pawns[id].position = BoardMath.world(str(token.color),displayed,index)
+			pawns[id].position = world_position(str(token.color),displayed,index)
 			pawns[id].scale = Vector3.ONE * (0.64 if displayed >= BoardMath.HOME else 1.0)
 		if displayed <= 0 or displayed >= BoardMath.HOME:
 			continue
@@ -251,7 +266,7 @@ func layout_stacks(moving_id: String = "") -> void:
 			continue
 		ids.sort()
 		var color_groups: Dictionary = {}
-		var center := BoardMath.world(str(tokens[ids[0]].color), int(display_positions[ids[0]]), 0)
+		var center := world_position(str(tokens[ids[0]].color), int(display_positions[ids[0]]), 0)
 		for id in ids:
 			var color: String = tokens[id].color
 			if not color_groups.has(color):
@@ -296,7 +311,7 @@ func show_ranks(state: Dictionary) -> void:
 		var rank := order.find(player.id)
 		if rank < 0 or rank_labels.has(player.id):
 			continue
-		var center := BoardMath.world(str(player.color),0,0).lerp(BoardMath.world(str(player.color),0,3),0.5)
+		var center := world_position(str(player.color),0,0).lerp(world_position(str(player.color),0,3),0.5)
 		# A crown-and-rank badge stays on the winner's home dock, matching the
 		# celebratory board treatment instead of only showing the results dialog.
 		var badge := make_badge("♛\n"+["1st","2nd","3rd","4th"][rank],BOARD_COLORS[player.color],center+Vector3(0,0.72,0.75))
@@ -390,7 +405,7 @@ func animate_move(event: Dictionary) -> void:
 	leave_trail(pawns[id].position,BOARD_COLORS[token.color])
 	for step in range(steps):
 		var landing := finish if start == 0 else start + step + 1
-		var destination := BoardMath.world(str(token.color), landing, index)
+		var destination := world_position(str(token.color), landing, index)
 		await pawns[id].hop_to(destination, maxf(0.24,duration / maxf(steps, 1)), reduced_motion)
 		leave_trail(destination,BOARD_COLORS[token.color])
 		display_positions[id] = landing
@@ -423,7 +438,7 @@ func animate_capture(id: String) -> void:
 	var durations: Array[float] = []
 	var positions: Array[int] = []
 	for landing in range(from-1,-1,-1):
-		points.append(BoardMath.world(color,landing,index))
+		points.append(world_position(color,landing,index))
 		durations.append((CAPTURE_HOME_MS if landing == 0 else CAPTURE_STEP_MS)/1000.0)
 		positions.append(landing)
 	var passed := func(point_index: int):
@@ -457,6 +472,7 @@ func reconcile_state(snapshot: Dictionary) -> void:
 			await animate_capture(id)
 
 func token_at_screen(point: Vector2) -> String:
+	point = point * Vector2(viewport.size) / size
 	# Test the complete visible pin, including its animated head, rather than
 	# only the board-level base collider. Ignore non-selectable occluders.
 	var selected := ""
@@ -466,7 +482,7 @@ func token_at_screen(point: Vector2) -> String:
 		if not pawn.legal_move or pawn.moving:
 			continue
 		var pin: Node3D = pawn.visual
-		var corners := [Vector3(-0.49,0,0.22),Vector3(0.49,0,0.22),Vector3(0.49,1.55,0.22),Vector3(-0.49,1.55,0.22)]
+		var corners := [Vector3(-0.58,0,0.22),Vector3(0.58,0,0.22),Vector3(0.58,1.72,0.22),Vector3(-0.58,1.72,0.22)]
 		var rect := Rect2(camera.unproject_position(pin.to_global(corners[0])),Vector2.ZERO)
 		for corner in corners:
 			rect = rect.expand(camera.unproject_position(pin.to_global(corner)))
@@ -500,7 +516,7 @@ func show_departed(state: Dictionary) -> void:
 	for player in departed:
 		if departure_labels.has(player.id):
 			continue
-		var center := BoardMath.world(str(player.color),0,0).lerp(BoardMath.world(str(player.color),0,3),0.5)
+		var center := world_position(str(player.color),0,0).lerp(world_position(str(player.color),0,3),0.5)
 		var badge := make_badge("LEFT THE\nGAME",Color("14263f"),center+Vector3(0,0.8,0))
 		# Draw after the alpha-sorted printed board so far corners stay readable.
 		badge.render_priority = 8

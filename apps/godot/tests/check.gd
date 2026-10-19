@@ -67,7 +67,7 @@ func run() -> void:
 	check(host.board.pawns.size() == 8, "Eight pawns modeled for two players")
 	check(host.turn_duration_ms == 30000 and friend.turn_duration_ms == 30000,"Both clients receive the 30-second phase duration")
 	check(host.board.board_plane.mesh is PlaneMesh,"Board artwork is a flat printed surface")
-	check(host.board.artwork_viewport.size == Vector2i(1024,1024),"Board artwork uses a bounded cache texture")
+	check(host.board.artwork_viewport.size.x == 1024 and host.board.artwork_viewport.size.y >= 1024,"Board artwork cache matches its rectangular layout")
 	for seat in range(4):
 		check(BoardMath.world(BoardMath.COLORS[seat],0,0).y > host.board.board_plane.position.y,"Home pawn sits above the flat board")
 	for pawn in host.board.pawns.values():
@@ -88,7 +88,7 @@ func run() -> void:
 	check(host.cards[0].player_id == host.self_id and host.cards[2].player_id == friend.self_id,"Two-player profiles occupy opposite board corners")
 	check(JSON.stringify(host.game) == JSON.stringify(friend.game), "Initial authoritative states match")
 	check(host.cards[2].gift.visible and not host.cards[2].gift.disabled, "Opponent has an enabled sticker button")
-	check(host.cards[2].gift.size.x == 40 and host.cards[2].gift.size.y == 28,"Emoji icon uses compact reference-style dimensions")
+	check(host.cards[2].gift.size.x == 32 and host.cards[2].gift.size.y == 24,"Emoji icon uses compact reference-style dimensions")
 	check(host.cards[0].chat.visible and host.cards[0].camera_button.visible and not host.cards[0].gift.visible,"Own profile shows only chat and camera, never a self-send emoji")
 	check(not host.cards[2].chat.visible and not host.cards[2].camera_button.visible and host.cards[2].gift.visible,"Opponent profile shows only an emoji icon")
 	check(friend.cards[2].chat.visible and not friend.cards[0].chat.visible,"Each client sees controls only on their own profile")
@@ -115,7 +115,7 @@ func run() -> void:
 	var profile = host.cards[2].avatar
 	check(profile.clip_contents and is_equal_approx(profile.size.x,profile.size.y),"Avatar is clipped to a square frame")
 	for card in host.cards:
-		check(card.avatar.size.x >= 72 and card.avatar.size.y >= 72,"Every player has an enlarged video-ready profile square")
+		check(card.avatar.size.x >= 52 and is_equal_approx(card.avatar.size.x,card.avatar.size.y),"Mobile portraits stay compact and square")
 	check(host.cards[0].name_label.get_global_rect().end.y <= host.cards[0].avatar.global_position.y,"Player name stays above the video square")
 	check(not host.cards[0].avatar.get_global_rect().intersects(host.cards[0].roll.get_global_rect()),"Video square and dice do not overlap")
 	var photo := GradientTexture2D.new()
@@ -173,7 +173,7 @@ func run() -> void:
 		check(pin.ring.mesh is TorusMesh and pin.ring.material_override.metallic > 0.7, "Selectable feet have a solid metallic ring")
 		check(pin.glow_floor.material_override.get_shader_parameter("tint") == pin.token_color, "Selectable aura matches token color")
 		for height in [0.05,0.75,1.40]:
-			var point: Vector2 = active.board.camera.unproject_position(pin.visual.to_global(Vector3(0,height,0.22)))
+			var point: Vector2 = active.board.display_point(active.board.camera.unproject_position(pin.visual.to_global(Vector3(0,height,0.22))))
 			check(active.board.token_at_screen(point) == token_id, "Head, center and feet select the complete visible token")
 		var observer = friend if active == host else host
 		for pawn in observer.board.pawns.values():
@@ -184,12 +184,12 @@ func run() -> void:
 		var click := InputEventMouseButton.new()
 		click.button_index = MOUSE_BUTTON_LEFT
 		click.pressed = true
-		click.position = active.board.camera.unproject_position(active.board.pawns[token_id].global_position + Vector3.UP*0.8)
+		click.position = active.board.display_point(active.board.camera.unproject_position(active.board.pawns[token_id].global_position + Vector3.UP*0.8))
 		active.board._gui_input(click)
 		check(active.pending, "3D ray picking submits the legal pawn intent")
 		check(await wait_until(func(): return int(host.game.get("version",0)) > before and not host.processing_events and not friend.processing_events), "Pawn move and animation finish")
 		check(int(host.board.tokens[token_id].position) == 1, "Pawn enters track")
-		check(host.board.pawns[token_id].position.is_equal_approx(BoardMath.world(str(host.board.tokens[token_id].color),1,0)), "3D pawn lands at authoritative coordinate")
+		check(host.board.pawns[token_id].position.is_equal_approx(host.board.world_position(str(host.board.tokens[token_id].color),1,0)), "3D pawn lands at authoritative coordinate")
 		check(JSON.stringify(host.game) == JSON.stringify(friend.game), "Both clients agree after movement")
 	host.chat_input.text = "Hello from Godot"
 	friend.presenting = true
@@ -241,7 +241,7 @@ func run() -> void:
 	for badge in host.board.stack_labels:
 		check(badge.text in ["4","1"], "Stack head badge explicitly shows its color group count")
 	var stack_pin = host.board.pawns[host.self_id+"-0"]
-	var stack_point: Vector2 = host.board.camera.unproject_position(stack_pin.visual.to_global(Vector3(0,1.02,0.26)))
+	var stack_point: Vector2 = host.board.display_point(host.board.camera.unproject_position(stack_pin.visual.to_global(Vector3(0,1.02,0.26))))
 	check(host.board.token_at_screen(stack_point).begins_with(host.self_id+"-"), "Mixed stacks cannot let an opponent occlude a selectable pin")
 	host.board.leave_trail(Vector3.ZERO,host.board.BOARD_COLORS.coral)
 	check(not host.board.trails.is_empty(), "Each step creates a colored fading trail")
@@ -295,7 +295,8 @@ func check_token_framing() -> void:
 	var pin := Pawn.new()
 	frame.world.add_child(pin)
 	pin.configure("frame-test",Color.RED)
-	for dimensions in [Vector2(420,420),Vector2(320,260),Vector2(560,300)]:
+	frame.framing_width = 15.8
+	for dimensions in [Vector2(420,420),Vector2(420,460),Vector2(320,260),Vector2(560,300)]:
 		frame.size = dimensions
 		await process_frame
 		frame._fit_camera()

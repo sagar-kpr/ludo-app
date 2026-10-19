@@ -36,6 +36,7 @@ func run() -> void:
 		client._safe_area()
 		for frame in range(5):
 			await process_frame
+		check(not client.content.get_child(0).visible and not client.notice.visible,"Gameplay hides the header and footer")
 		var red: Rect2 = client.cards[0].get_global_rect()
 		var green: Rect2 = client.cards[1].get_global_rect()
 		var yellow: Rect2 = client.cards[2].get_global_rect()
@@ -49,14 +50,36 @@ func run() -> void:
 		check(absf(board_rect.get_center().x-client.get_viewport_rect().get_center().x) <= 1.0,"Board stays horizontally centered at %s (offset %.2f)" % [viewport_size,board_rect.get_center().x-client.get_viewport_rect().get_center().x])
 		check(not board_rect.intersects(red) and not board_rect.intersects(blue),"Player rows never overlap the play area")
 		check(client.get_viewport_rect().encloses(board_rect),"Board fits the available viewport")
-		check(board_rect.size.y <= client.board.preferred_height(board_rect.size.x)+1,"Printed board uses the available height")
+		check(absf(board_rect.size.x-board_rect.size.y) <= board_rect.size.x*0.02,"Printed board retains square proportions on every screen")
 		if client.using_landscape:
 			check(red.end.x <= board_rect.position.x and green.position.x >= board_rect.end.x,"Wide windows place profiles beside the board")
 			check(board_rect.size.y >= client.cards[0].size.y*1.5,"Short desktop windows keep the board larger than the profile cards")
 		else:
 			var top_row: Rect2 = client.player_rows[0].get_global_rect()
 			var bottom_row: Rect2 = client.player_rows[1].get_global_rect()
+			check(top_row.position.y >= (24.0 if viewport_size.x < 640 else 8.0),"Upper profiles stay clear of browser chrome")
+			check(bottom_row.end.y <= viewport_size.y-8.0,"Lower profiles stay inside the safe viewport")
 			check(absf(board_rect.position.y-top_row.end.y-(bottom_row.position.y-board_rect.end.y)) <= 2,"Visible board and player rows keep balanced spacing")
+			check(board_rect.size.y >= (bottom_row.position.y-top_row.end.y)*0.85,"Player rows remain close to the board")
+		check(client.board.viewport.size == Vector2i(client.board.size),"Board renders at its displayed size without stretching the image")
+		var center_size: Vector2 = client.board.board_plane.mesh.size
+		check(is_equal_approx(center_size.x,center_size.y),"Board geometry stays square")
+		for color in client.BoardMath.COLORS:
+			for step in range(1,57):
+				var cell: Vector2i = client.BoardMath.coordinate(color,step,0)
+				var ink: Vector2 = client.board.artwork.ORIGIN+(Vector2(cell.y,cell.x)+Vector2.ONE*0.5)*client.board.artwork.CELL
+				var rendered: Vector2 = ink/Vector2(client.board.artwork_viewport.size)*client.board.board_plane.mesh.size-client.board.board_plane.mesh.size*0.5
+				var position: Vector3 = client.board.world_position(color,step,0)
+				check(rendered.is_equal_approx(Vector2(position.x,position.z)),"Square board cells align with every pawn destination")
+		# Pointer coordinates follow the rebuilt board, including after rotations.
+		for seat in range(4):
+			var id := str(seat)+"-0"
+			var pawn = client.board.pawns[id]
+			pawn.legal_move = true
+			for height in [0.1,0.75,1.4]:
+				var point: Vector2 = client.board.display_point(client.board.camera.unproject_position(pawn.visual.to_global(Vector3(0,height,0.22))))
+				check(client.board.token_at_screen(point) == id,"Pawn head, center and feet remain selectable at %s" % viewport_size)
+			pawn.legal_move = false
 		for card in client.cards:
 			check(client.get_viewport_rect().encloses(card.get_global_rect()),"Profile and actions fit even on narrow screens")
 			check(card.avatar.global_position.y-card.name_label.get_global_rect().end.y >= 4,"Player name has breathing room above the avatar")
@@ -66,6 +89,9 @@ func run() -> void:
 			if card.roll.visible:
 				check(card.roll.global_position.x-card.avatar.get_global_rect().end.x >= 12,"Avatar and dice have a distinct gap")
 				check(card.avatar.size.y > card.roll.size.y and card.roll.size.y >= 48,"Avatar remains taller than the dice with a usable roll target")
+			if viewport_size.x < 640:
+				check(card.avatar.size.y <= 56 and card.size.y <= 144,"Phone profiles and avatars stay compact even on tall screens")
+				check(board_rect.size.x+1 >= card.size.x*2,"Phone board dominates the profile card width")
 			check(card.lives.remaining == 5,"Every player starts with five filled life dots")
 			check(is_equal_approx(card.lives.size.x,card.avatar.size.x),"Five dots span exactly the avatar width")
 			check(card.lives.global_position.y >= card.avatar.get_global_rect().end.y+4,"Life dots sit below the portrait")
@@ -112,6 +138,9 @@ func run() -> void:
 		check(background.bg_color.srgb_to_linear().get_luminance() < 0.05 and caption.get_theme_color("font_color").get_luminance() > 0.9, "Chat uses readable light text on dark background")
 	client.chat_bubbles.show_message(client.cards[0], "Player 0", "Replacement")
 	check(client.chat_bubbles.entries.size() == 4, "New sender message replaces the existing caption")
+	client.return_home()
+	await process_frame
+	check(client.content.get_child(0).visible and client.notice.visible,"Returning home restores the header and notices")
 	client.queue_free()
 	await process_frame
 	print("UI regressions: %d checks, %d failures" % [checks, failures])

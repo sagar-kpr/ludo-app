@@ -74,6 +74,8 @@ var web_form_ready := false
 var web_form_elapsed := 0.0
 var web_focused_field := ""
 var web_viewport_revision := -1
+var web_safe_top := 0.0
+var web_safe_bottom := 0.0
 
 func _process(delta: float) -> void:
 	if is_instance_valid(sticker_picker) and sticker_picker.visible:
@@ -109,6 +111,12 @@ func sync_web_form() -> void:
 		var css_width := maxf(1,float(values.get("viewportWidth",420)))
 		var css_height := maxf(1,float(values.get("viewportHeight",860)))
 		var reference_width := maxf(420,css_width)
+		var safe_top := float(values.get("safeTop",0))*reference_width/css_width
+		var safe_bottom := float(values.get("safeBottom",0))*reference_width/css_width
+		if not is_equal_approx(safe_top,web_safe_top) or not is_equal_approx(safe_bottom,web_safe_bottom):
+			web_safe_top = safe_top
+			web_safe_bottom = safe_bottom
+			_safe_area.call_deferred()
 		var reference := Vector2i(roundi(reference_width),roundi(css_height*reference_width/css_width))
 		if get_window().content_scale_size != reference:
 			get_window().content_scale_size = reference
@@ -189,24 +197,33 @@ func _safe_area() -> void:
 		var ratio := get_viewport_rect().size.y / maxf(screen.y, 1)
 		inset_top = maxi(12, int(safe.position.y * ratio))
 		inset_bottom = maxi(12, int((screen.y - safe.end.y) * ratio))
+	if game_view.visible:
+		# Leave breathing room below phone browser chrome and the status area.
+		inset_top = maxi(inset_top,maxi(24 if get_viewport_rect().size.x < 640 else 8,ceili(web_safe_top)+8))
+		inset_bottom = maxi(inset_bottom,ceili(web_safe_bottom)+8)
 	var margin := get_node("SafeArea") as MarginContainer
 	margin.add_theme_constant_override("margin_top", inset_top)
 	margin.add_theme_constant_override("margin_bottom", inset_bottom)
 	margin.add_theme_constant_override("margin_left",4)
 	margin.add_theme_constant_override("margin_right",4)
+	# Keep the entire safe area for the table; setup still needs its title and notices.
+	content.get_child(0).visible = not game_view.visible
+	notice.visible = not game_view.visible
 	var available := get_viewport_rect().size
 	if is_instance_valid(home_card):
 		home_card.custom_minimum_size.y = maxf(420.0, available.y * 0.60)
 	if game_view.visible and is_instance_valid(board):
 		var width_limit := available.x-8.0
+		var mobile_portrait := available.x < 640.0
+		board.framing_width = 15.8 if mobile_portrait else board.FRAMING_WIDTH
 		for card in cards:
-			card.fit_width((width_limit-16.0)*0.5,available.y)
+			card.fit_width((width_limit-16.0)*0.5,available.y,mobile_portrait)
 		set_game_layout(available.x >= 640.0 and available.x > available.y*1.25)
 		if using_landscape:
 			var profile_width := 156.0 if available.y < 680.0 else 180.0
 			left_profiles.custom_minimum_size.x = profile_width
 			right_profiles.custom_minimum_size.x = profile_width
-			var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + inset_top + inset_bottom + content.get_theme_constant("separation")*2
+			var chrome: float = inset_top + inset_bottom
 			var height_limit := maxf(80.0,available.y-chrome)
 			var width := floorf(minf(maxf(80.0,width_limit-profile_width*2-24.0),height_limit/board.preferred_height(1.0)))
 			content.custom_minimum_size.x = width+profile_width*2+24.0
@@ -217,7 +234,7 @@ func _safe_area() -> void:
 		var top_row := player_rows[0]
 		var bottom_row := player_rows[1]
 		var rows := top_row.get_combined_minimum_size().y + bottom_row.get_combined_minimum_size().y
-		var chrome: float = content.get_child(0).get_combined_minimum_size().y + notice.get_combined_minimum_size().y + rows + inset_top + inset_bottom + content.get_theme_constant("separation")*2 + game_view.get_theme_constant("separation")*2
+		var chrome: float = rows + inset_top + inset_bottom + game_view.get_theme_constant("separation")*2
 		var height_limit := maxf(80.0,available.y-chrome)
 		var row_width := maxf(top_row.get_combined_minimum_size().x,bottom_row.get_combined_minimum_size().x)
 		# Use the same projected bounds as the camera: no guessed square size
@@ -413,7 +430,7 @@ func build_ui() -> void:
 	lobby.add_child(label("The host can start when at least 2 players have joined.\nEveryone uses the same room code.", 14, Design.MUTED))
 	game_view = VBoxContainer.new()
 	game_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	game_view.add_theme_constant_override("separation", 8)
+	game_view.add_theme_constant_override("separation", 0)
 	game_view.alignment = BoxContainer.ALIGNMENT_CENTER
 	game_view.hide()
 	content.add_child(game_view)
@@ -445,6 +462,8 @@ func build_ui() -> void:
 			board.reduced_motion = reduced_motion
 			board_holder = MarginContainer.new()
 			board_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			# Keep the player rows close to the square board; spare height stays outside the group.
+			board_holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			game_view.add_child(board_holder)
 			board_holder.add_child(board)
 			board.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -846,6 +865,7 @@ func present_event(event: Dictionary) -> void:
 				home.show()
 				lobby.hide()
 				game_view.hide()
+				_safe_area()
 				notice.text = "This room is no longer available. Please create or join a room."
 			elif event.get("resumed",false):
 				notice.text = "Connection restored. Resuming your game…"

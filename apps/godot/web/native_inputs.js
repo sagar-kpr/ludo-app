@@ -17,6 +17,10 @@
   layer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:20;';
   stage.append(layer);
 
+  const safeArea = document.createElement('div');
+  safeArea.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);';
+  document.body.append(safeArea);
+
   const fields = new Map();
   let latest;
   let revision = 0;
@@ -124,6 +128,9 @@
     values.viewportRevision = revision;
     values.viewportWidth = stage.clientWidth;
     values.viewportHeight = stage.clientHeight;
+    const safeStyle = getComputedStyle(safeArea);
+    values.safeTop = parseFloat(safeStyle.paddingTop) || 0;
+    values.safeBottom = parseFloat(safeStyle.paddingBottom) || 0;
     return JSON.stringify(values);
   };
 })();

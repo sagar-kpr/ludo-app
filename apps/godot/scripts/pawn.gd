@@ -101,8 +101,8 @@ func configure(id: String, color: Color) -> void:
 	base_visual.name = "SilverBase"
 	add_child(base_visual)
 	var foot := TorusMesh.new()
-	foot.inner_radius = 0.29
-	foot.outer_radius = 0.40
+	foot.inner_radius = 0.34
+	foot.outer_radius = 0.46
 	foot.rings = 48
 	foot.ring_segments = 12
 	var silver_shader := Shader.new()
@@ -131,7 +131,7 @@ func configure(id: String, color: Color) -> void:
 	var outline: Array[Vector2] = [Vector2.ZERO]
 	for step in range(33):
 		var angle := -PI/6.0 + step*(4.0*PI/3.0)/32.0
-		outline.append(Vector2(cos(angle)*0.43,0.98+sin(angle)*0.43))
+		outline.append(Vector2(cos(angle)*0.52,1.04+sin(angle)*0.52))
 	var shell := part(Geometry.beveled_pin(outline,0.38,0.055),Vector3.ZERO,lacquer(Color("596169")))
 	shell.name = "PinShell"
 	shell.reparent(visual,false)
@@ -141,20 +141,20 @@ func configure(id: String, color: Color) -> void:
 	body.scale = Vector3(0.92,0.95,1.0)
 	body.reparent(visual,false)
 	var crown := SphereMesh.new()
-	crown.radius = 0.265
-	crown.height = 0.53
+	crown.radius = 0.35
+	crown.height = 0.70
 	crown.radial_segments = 32
 	crown.rings = 16
-	var dome := part(crown,Vector3(0,0.98,0.45),lacquer(color))
+	var dome := part(crown,Vector3(0,1.04,0.45),lacquer(color))
 	dome.name = "PinDome"
 	dome.scale.z = 0.48
 	dome.reparent(visual,false)
 	var badge := CylinderMesh.new()
-	badge.top_radius = 0.30
-	badge.bottom_radius = 0.30
+	badge.top_radius = 0.39
+	badge.bottom_radius = 0.39
 	badge.height = 0.025
 	badge.radial_segments = 40
-	var center := part(badge,Vector3(0,0.98,0.40),lacquer(Color("46515b")))
+	var center := part(badge,Vector3(0,1.04,0.40),lacquer(Color("46515b")))
 	center.name = "PinBadge"
 	center.rotation.x = PI/2.0
 	center.reparent(visual,false)
@@ -215,7 +215,7 @@ func configure(id: String, color: Color) -> void:
 	area.set_meta("token_id", token_id)
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(0.98,1.60,0.55)
+	shape.size = Vector3(1.16,1.72,0.55)
 	collision.shape = shape
 	collision.position.y = 0.75
 	area.add_child(collision)

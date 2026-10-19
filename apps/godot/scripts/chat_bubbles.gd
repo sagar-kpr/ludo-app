@@ -50,13 +50,15 @@ func position_bubble(entry: Dictionary) -> void:
 	var card: Control = entry.card
 	var panel: Control = entry.panel
 	# Face captions away from the table: above top cards, below bottom cards.
-	# Fall back below top-edge cards and clamp to the browser/safe viewport.
+	# Use the inward side when either row touches the safe viewport edge.
 	var width := minf(card.panel.size.x, 200.0)
 	panel.size = Vector2(maxf(80, width), 0)
 	var at: Vector2 = card.panel.global_position - global_position
 	at.y -= panel.size.y + 6
 	if at.y < 4 or card.global_position.y-global_position.y > size.y * 0.5:
 		at.y = card.global_position.y - global_position.y + card.size.y + 4
+		if at.y + panel.size.y > size.y - 4:
+			at.y = card.panel.global_position.y - global_position.y - panel.size.y - 6
 	at.x = clampf(at.x, 4, maxf(4, size.x-panel.size.x-4))
 	at.y = clampf(at.y, 4, maxf(4, size.y-panel.size.y-4))
 	panel.position = at

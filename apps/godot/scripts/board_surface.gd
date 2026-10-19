@@ -20,7 +20,7 @@ func _ready() -> void:
 		var color: Color = colors[key]
 		var gradient := Gradient.new()
 		gradient.offsets = PackedFloat32Array([0.0, 0.40, 1.0])
-		var shade: Color = Color("e8ac08") if color == Tokens.yellow else color.darkened(Tokens.yard_shade)
+		var shade: Color = color.darkened(Tokens.yard_shade)
 		gradient.colors = PackedColorArray([color.lightened(Tokens.yard_highlight), color, shade])
 		var texture := GradientTexture2D.new()
 		texture.gradient = gradient
@@ -33,8 +33,8 @@ func _ready() -> void:
 	for color in [Tokens.cell_white, Tokens.red, Tokens.green, Tokens.blue, Tokens.yellow]:
 		var gradient := Gradient.new()
 		gradient.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
-		var shade: Color = Color("e8ac08") if color == Tokens.yellow else color.darkened(0.18 if color != Tokens.cell_white else 0.06)
-		gradient.colors = PackedColorArray([color.lightened(0.16), color, shade])
+		var shade: Color = color.darkened(0.035 if color != Tokens.cell_white else 0.02)
+		gradient.colors = PackedColorArray([color.lightened(0.035), color, shade])
 		var texture := GradientTexture2D.new()
 		texture.gradient = gradient
 		texture.width = 64
@@ -145,7 +145,7 @@ func _draw_star(at: Vector2, ink: Color) -> void:
 	var points := PackedVector2Array()
 	for index in range(10):
 		var angle := index * TAU / 10 - PI / 2
-		var radius := CELL * (0.36 if index % 2 == 0 else 0.17)
+		var radius := CELL * (0.42 if index % 2 == 0 else 0.19)
 		points.append(at + Vector2(cos(angle), sin(angle)) * radius)
 	points.append(points[0])
 	draw_polyline(points, ink, Tokens.symbol_width, true)

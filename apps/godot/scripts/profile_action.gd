@@ -9,7 +9,7 @@ var unread := false:
 		queue_redraw()
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(40,28)
+	custom_minimum_size = Vector2(32,24)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	for state in ["normal","hover","pressed","disabled"]:
 		var fill := Color("193d70")
@@ -32,7 +32,7 @@ func _draw() -> void:
 	var ink := Color("f4f8ff")
 	if disabled:
 		ink.a = 0.45
-	draw_set_transform(size*0.5)
+	draw_set_transform(size*0.5,0,Vector2.ONE*0.85)
 	match kind:
 		"chat":
 			draw_polyline(PackedVector2Array([Vector2(-6,-5),Vector2(6,-5),Vector2(6,3),Vector2(-2,3),Vector2(-6,6),Vector2(-6,-5)]),ink,1.5,true)

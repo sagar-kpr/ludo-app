@@ -35,6 +35,7 @@ var finish_rank := -1
 var clock_accumulator := 0.0
 var touch_tween: Tween
 var compact_height := false
+var compact_portrait := false
 var media_row: HBoxContainer
 var dice_slot: HBoxContainer
 
@@ -82,7 +83,7 @@ func update_clock() -> void:
 
 func set_rank(rank: int) -> void:
 	finish_rank = rank
-	status_label.custom_minimum_size.x = 66 if departed else 76 if rank == 0 else 50
+	status_label.custom_minimum_size.x = 66 if departed else 76 if rank == 0 else 38 if compact_portrait and rank < 0 else 50
 	if rank >= 0:
 		turn_active = false
 		roll.hide()
@@ -134,8 +135,8 @@ func _ready() -> void:
 	heading.add_child(status_label)
 	actions = HBoxContainer.new()
 	actions.alignment = BoxContainer.ALIGNMENT_BEGIN
-	actions.custom_minimum_size.y = 28
-	actions.add_theme_constant_override("separation",6)
+	actions.custom_minimum_size.y = 24
+	actions.add_theme_constant_override("separation",4)
 	add_child(actions)
 	chat = ProfileAction.new()
 	chat.kind = "chat"
@@ -190,12 +191,15 @@ func _ready() -> void:
 	invite.pressed.connect(func(): invite_pressed.emit())
 	row.add_child(invite)
 
-func fit_width(available_width: float, viewport_height: float = 860.0) -> void:
-	compact_height = viewport_height < 680.0
-	custom_minimum_size.x = minf(156.0 if compact_height else 180.0,available_width)
+func fit_width(available_width: float, viewport_height: float = 860.0, mobile_portrait: bool = false) -> void:
+	compact_portrait = mobile_portrait
+	compact_height = viewport_height < 680.0 or compact_portrait
+	custom_minimum_size.x = minf(152.0 if compact_portrait else 156.0 if compact_height else 180.0,available_width)
 	var compact := available_width < 164.0
-	var portrait_size := 50.0 if viewport_height < 450.0 else 56.0 if compact_height else 64.0 if compact else 72.0
-	var dice_size := 48.0 if compact or compact_height else 56.0
+	var portrait_size := 52.0 if compact_portrait else 50.0 if viewport_height < 450.0 else 56.0 if compact_height else 64.0 if compact else 72.0
+	var dice_size := minf(portrait_size-2.0,52.0 if compact or compact_height else 60.0)
+	name_label.add_theme_font_size_override("font_size",13 if compact_portrait else 14)
+	set_rank(finish_rank)
 	avatar.custom_minimum_size = Vector2.ONE*portrait_size
 	roll.custom_minimum_size = Vector2.ONE*dice_size
 	dice.custom_minimum_size = Vector2.ONE*dice_size

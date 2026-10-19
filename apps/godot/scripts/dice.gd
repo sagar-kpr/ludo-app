@@ -50,11 +50,11 @@ func _ready() -> void:
 		die.add_child(face_root)
 		for pip in PIPS[face]:
 			var inset := CylinderMesh.new()
-			inset.top_radius = 0.071
-			inset.bottom_radius = 0.071
+			inset.top_radius = 0.095
+			inset.bottom_radius = 0.095
 			inset.height = 0.006
 			inset.radial_segments = 24
-			add_mesh(inset, Vector3(pip.x*0.25,0.502,pip.y*0.25), black, face_root)
+			add_mesh(inset, Vector3(pip.x*0.23,0.502,pip.y*0.23), black, face_root)
 	# Ground shadow makes the cube's height visible inside its button.
 	var shadow := CylinderMesh.new()
 	shadow.top_radius = 0.60
@@ -94,7 +94,7 @@ func enamel() -> ShaderMaterial:
 		vec3 n = normalize(normal_world);
 		vec3 v = normalize(CAMERA_POSITION_WORLD-position_world);
 		vec3 key = normalize(vec3(-0.6,1.0,0.4));
-		float light = 0.66+0.30*max(dot(n,key),0.0);
+		float light = 0.72+0.24*max(dot(n,key),0.0);
 		float shine = pow(max(dot(n,normalize(key+v)),0.0),28.0)*0.14;
 		ALBEDO = vec3(0.96,0.97,1.0)*light+vec3(shine);
 	}
@@ -138,16 +138,16 @@ func rounded_cube() -> ImmediateMesh:
 	]
 	for face in faces:
 		var order := [0,2,1,0,3,2] if face[1].cross(face[2]).dot(face[0]) > 0 else [0,1,2,0,2,3]
-		for row in range(8):
-			for col in range(8):
+		for row in range(12):
+			for col in range(12):
 				var corners := [Vector2(col,row),Vector2(col+1,row),Vector2(col+1,row+1),Vector2(col,row+1)]
 				for index in order:
-					var grid: Vector2 = corners[index] / 8.0 - Vector2.ONE*0.5
+					var grid: Vector2 = corners[index] / 12.0 - Vector2.ONE*0.5
 					var raw: Vector3 = face[0]*0.5 + face[1]*grid.x + face[2]*grid.y
-					var inner := raw.clamp(Vector3.ONE*-0.39,Vector3.ONE*0.39)
+					var inner := raw.clamp(Vector3.ONE*-0.34,Vector3.ONE*0.34)
 					var normal := (raw-inner).normalized()
 					mesh.surface_set_normal(normal)
-					mesh.surface_add_vertex(inner+normal*0.11)
+					mesh.surface_add_vertex(inner+normal*0.16)
 	mesh.surface_end()
 	return mesh
 
@@ -161,7 +161,7 @@ func add_mesh(mesh: Mesh, position_at: Vector3, material: Material, parent: Node
 func show_face(value: int) -> void:
 	if die and FACE_ROTATIONS.has(value):
 		settled_value = value
-		camera.size = 1.75
+		camera.size = 1.60
 		die.rotation = FACE_ROTATIONS[value]
 		die.position = Vector3.ZERO
 		die.scale = Vector3.ONE
