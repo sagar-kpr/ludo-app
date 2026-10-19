@@ -7,8 +7,8 @@ Android-specific LiveKit integration. The previous Expo client is preserved in
 ## Premium restyle — section 1: board
 
 The board uses one editable Theme: [`resources/theme_tokens.tres`](resources/theme_tokens.tres).
-Open it in the Godot Inspector to edit red `#D93A2F`, green `#3F9F4F`, blue
-`#4FA3E8`, yellow `#F9D342`, grid/symbol ink and gradient strength. Under the
+Open it in the Godot Inspector to edit red `#F2131B`, green `#00A64B`, blue
+`#23ACE8`, yellow `#FFEB00`, grid/symbol ink and gradient strength. Under the
 Theme's `Board` styleboxes, edit `frame`/`rim` for exterior radii/borders/shadows,
 `yard_floor` for white-yard radii/shadows and `yard_inset` for inset shading.
 Style dimensions are in artwork pixels (64 pixels per board cell).
@@ -42,9 +42,12 @@ Shadow/queue-update files: `scripts/board.gd`, `pawn.gd`, `design.gd`, `main.gd`
 `theme_tokens.gd`, `resources/theme_tokens.tres`, `tests/board_visuals.gd`,
 `tests/presentation.gd` and its `.uid` sidecar, plus this README.
 
-`scripts/board_surface.gd` draws StyleBoxFlat frames and white yards,
-GradientTexture2D yard fills, thin grid lines, safe stars at the existing safe
-coordinates, inward home-path arrows and vertex-gradient center triangles.
+`scripts/board_surface.gd` draws matte StyleBoxFlat frames and home trays,
+restrained GradientTexture2D fills, shared grid edges, recessed circular docks,
+safe stars at the existing safe coordinates, inward arrows, subtle home-lane
+chevrons and inlaid center triangles. Every cell uses the same 64×64 rectangle;
+decorative bevels remain inside its bounds. The player palette and all pawn
+anchors retain their existing values.
 StyleBoxFlat does not offer gradient fills or inner shadows: gradient textures
 and a layered translucent inset border provide those effects on both targets.
 The artwork is rendered once in a 1024×1024 SubViewport and applied to one unlit
@@ -53,11 +56,15 @@ There are no new downloaded textures, custom shaders or per-frame art nodes.
 The cache is a runtime render texture, so ETC2/ASTC asset compression does not
 apply to it (approximately 4 MiB for the RGBA color attachment).
 
-This section changes board artwork and the shared player-color palette only.
+The final animated board viewport follows screen pixel density, with a maximum
+1024-pixel edge, so dense phone screens do not upscale a UI-resolution image.
+This does not resize or redraw the square artwork cache. Pointer coordinates
+and completion badges account for the render density. Completion badges are
+also restored after a layout change reparents the board.
+
 The current token models, dice, cards, screen layout, background, rules, turn
-timing and room/network implementation remain in place. Existing dock markers
-remain until section 2 adds the glossy tokens and proper slots. Compatibility
-rendering and `canvas_items`/`expand` are already configured in `project.godot`.
+timing and room/network implementation remain in place. Compatibility rendering
+and `canvas_items`/`expand` are already configured in `project.godot`.
 
 Focused offline checks (art/pawn alignment, home lanes and selectable pins):
 
@@ -65,11 +72,10 @@ Focused offline checks (art/pawn alignment, home lanes and selectable pins):
 .tools/godot/Godot_v4.6.1-stable_linux.x86_64 --headless --path apps/godot --script res://tests/board_visuals.gd
 ```
 
-Run this from the repository root. The original integration suite's board
-assertions now check the cached surface instead of removed individual floor
-meshes. That suite also has unrelated baseline failures (including overshoot,
-old pawn/card expectations and an invalid ShaderMaterial `albedo_color` read);
-those failures are outside this visual section and have not been repaired.
+Run this from the repository root. The board checks cover shared cell edges,
+art/pawn alignment, safe zones, movement and cache reuse. Run
+`res://tests/ui_regressions.gd` for portrait/landscape layouts and simulated
+three-times pixel density, and `npm run godot:test` for two-client gameplay.
 Android hardware and mobile Safari performance require device verification;
 this section does not certify the 60 FPS target.
 

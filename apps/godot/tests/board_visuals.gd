@@ -19,6 +19,8 @@ func check(condition: bool, message: String) -> void:
 func run() -> void:
 	var board := Board.new()
 	root.add_child(board)
+	var cache_draws := [0]
+	board.artwork.draw.connect(func(): cache_draws[0] += 1)
 	board.size = Vector2(420, 420)
 	await process_frame
 	check(Tokens is Theme, "Single editable resource is a Godot Theme")
@@ -26,6 +28,14 @@ func run() -> void:
 	check(board.artwork_viewport.size == Vector2i(1024, 1024), "Board texture stays within the mobile texture budget")
 	check(board.artwork_viewport.disable_3d and board.artwork_viewport.gui_disable_input, "Art cache cannot render 3D or intercept input")
 	check(board.world.get_child_count() < 10, "Static board uses bounded scene complexity")
+	for row in range(15):
+		for col in range(15):
+			var cell: Rect2 = board.artwork._cell_rect(row,col)
+			check(cell.size == Vector2(64,64),"Every cell retains the same square dimensions")
+			if col < 14:
+				check(cell.end.x == board.artwork._cell_rect(row,col+1).position.x,"Adjacent columns share an exact edge")
+			if row < 14:
+				check(cell.end.y == board.artwork._cell_rect(row+1,col).position.y,"Adjacent rows share an exact edge")
 	check(board.board_plane.material_override is StandardMaterial3D and board.board_plane.material_override.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED, "Printed colors are independent of 3D lights")
 	var state := {"players": [{"id": "local", "color": "coral"}], "currentPlayer": "local", "phase": "moving", "dice": 6, "tokens": []}
 	for seat in range(4):
@@ -106,9 +116,13 @@ func run() -> void:
 		board.clear_trail(mark)
 	state.tokens[0].position = 1
 	board.apply_state(state, "local")
+	for frame in range(3):
+		await process_frame
+	var draws_before_move: int = cache_draws[0]
 	var steps: Array[String] = []
 	board.step_landed.connect(func(id: String): steps.append(id))
 	await board.animate_move({"tokenId": "coral-0", "from": 1, "to": 4, "durationMs": 720})
+	check(cache_draws[0] == draws_before_move,"Multi-frame movement and shadows do not redraw the static artwork")
 	check(steps.size() == 3, "Move presentation still lands once per step")
 	check(board.trails.size() == 4, "Move leaves marks at departure and every landing")
 	for index in range(board.trails.size()):
@@ -182,6 +196,7 @@ func run() -> void:
 		token.position = 0
 	board.apply_state(state, "local")
 	check(board.pawns.values().all(func(pawn): return not pawn.completed and not pawn.finish_badge.visible), "Restart clears all pawn completion markers")
+	check(board.artwork_viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS,"Art cache never switches to continuous rendering")
 	board.queue_free()
 	await process_frame
 	print("Board visuals: %d checks, %d failures" % [checks, failures])

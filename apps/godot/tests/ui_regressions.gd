@@ -97,6 +97,27 @@ func run() -> void:
 			check(card.lives.global_position.y >= card.avatar.get_global_rect().end.y+4,"Life dots sit below the portrait")
 			check(is_equal_approx(card.lives.global_position.x,card.avatar.global_position.x),"Life dots align with the avatar")
 			check(card.lives.accent == client.Design.COLORS[client.BoardMath.COLORS[int(card.player_id)]],"Life dots use the player's board color")
+	# Simulate a phone with three physical pixels per UI pixel. Only the final
+	# render density changes; cell coordinates and pointer positions stay in UI space.
+	var before_density: Rect2 = client.board.printed_rect()
+	root.size = Vector2i(1170,2532)
+	for frame in range(5):
+		await process_frame
+	check(client.board.viewport.size.x > client.board.size.x*2,"Dense phone display receives a sharp render target")
+	check(maxi(client.board.viewport.size.x,client.board.viewport.size.y) <= client.board.MAX_RENDER_EDGE,"Dense render target remains within its pixel budget")
+	check(client.board.artwork_viewport.size == Vector2i(1024,1024),"Density changes preserve the square art cache")
+	check(client.board.printed_rect().position.distance_to(before_density.position) < 1 and client.board.printed_rect().size.distance_to(before_density.size) < 1,"Density changes do not move or stretch the board")
+	var dense_pawn = client.board.pawns["0-0"]
+	dense_pawn.legal_move = true
+	var dense_point: Vector2 = client.board.display_point(client.board.camera.unproject_position(dense_pawn.visual.to_global(Vector3(0,0.75,0.22))))
+	check(client.board.token_at_screen(dense_point) == "0-0","Token selection maps correctly through the dense render target")
+	client.board.place_completion_check(dense_pawn)
+	var badge_size: Vector2 = dense_pawn.finish_badge.size*dense_pawn.finish_badge.scale*client.board.size/Vector2(client.board.viewport.size)
+	check(badge_size.is_equal_approx(Vector2(16,16)),"Completion badges retain their visible size on dense screens")
+	dense_pawn.legal_move = false
+	root.size = Vector2i(390,844)
+	for frame in range(5):
+		await process_frame
 	var emoji_style: StyleBoxFlat = client.cards[1].gift.get_theme_stylebox("normal")
 	var chat_style: StyleBoxFlat = client.cards[0].chat.get_theme_stylebox("normal")
 	check(emoji_style.bg_color == chat_style.bg_color and emoji_style.border_color == chat_style.border_color,"Emoji, chat and camera buttons share the same theme")

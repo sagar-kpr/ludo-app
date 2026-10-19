@@ -27,6 +27,8 @@ var departure_labels: Dictionary = {}
 var trails: Array[MeshInstance3D] = []
 const TRAIL_POOL_SIZE := 16
 const FRAMING_WIDTH := 16.0
+# Bound the animated scene's render target; the static square art cache stays 1024px.
+const MAX_RENDER_EDGE := 1024
 var framing_width := FRAMING_WIDTH:
 	set(value):
 		if is_equal_approx(framing_width,value): return
@@ -79,6 +81,7 @@ func _ready() -> void:
 	camera.look_at(Vector3.ZERO)
 	camera.current = true
 	resized.connect(_fit_camera)
+	get_viewport().size_changed.connect(_fit_camera)
 	make_board()
 	make_trail_pool()
 	_fit_camera()
@@ -130,7 +133,13 @@ func world_position(color: String, position: int, index: int) -> Vector3:
 
 func _fit_camera() -> void:
 	if camera and size.x > 0 and size.y > 0:
-		viewport.size = Vector2i(maxi(1,roundi(size.x)),maxi(1,roundi(size.y)))
+		# Match physical screen pixels on dense phones instead of upscaling a
+		# low-resolution UI-sized render. Apply one density to both axes.
+		var screen_scale := (get_viewport_transform()*get_global_transform()).get_scale().abs()
+		var density := minf(maxf(1.0,minf(screen_scale.x,screen_scale.y)),MAX_RENDER_EDGE/maxf(size.x,size.y))
+		var render_size := Vector2i(maxi(1,roundi(size.x*density)),maxi(1,roundi(size.y*density)))
+		if viewport.size != render_size:
+			viewport.size = render_size
 		var bounds := projected_vertical_bounds()
 		camera.position = Vector3(0,30,5)+camera.global_basis.y*((bounds.x+bounds.y)*0.5)
 		camera.keep_aspect = Camera3D.KEEP_WIDTH
@@ -224,7 +233,14 @@ func make_completion_check() -> Control:
 	return badge
 
 func place_completion_check(pawn: Node3D) -> void:
-	pawn.finish_badge.position = camera.unproject_position(pawn.visual.to_global(Vector3(0, 1.46, 0.54))) - pawn.finish_badge.size * 0.5
+	# Changing between sidebars and rows reparents the board. A pawn's exit
+	# cleanup can free its canvas badge while retaining the pawn itself.
+	if not is_instance_valid(pawn.finish_badge):
+		pawn.finish_badge = make_completion_check()
+	pawn.finish_badge.visible = pawn.completed
+	# Keep the canvas overlay at the same visible size at any render density.
+	pawn.finish_badge.scale = Vector2(viewport.size)/size
+	pawn.finish_badge.position = camera.unproject_position(pawn.visual.to_global(Vector3(0, 1.46, 0.54))) - pawn.finish_badge.size * pawn.finish_badge.scale * 0.5
 
 func make_badge(text: String, color: Color, at: Vector3) -> Label3D:
 	var badge := Label3D.new()
@@ -298,7 +314,7 @@ func _process(_delta: float) -> void:
 		if pawns.has(id):
 			badge.position = pawns[id].visual.to_global(Vector3(0,1.05,0.51))
 	for pawn in pawns.values():
-		if pawn.completed and is_instance_valid(pawn.finish_badge):
+		if pawn.completed:
 			place_completion_check(pawn)
 
 func show_ranks(state: Dictionary) -> void:

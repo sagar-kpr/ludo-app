@@ -11,6 +11,7 @@ const CORNERS := [Vector2(0, 0), Vector2(9, 0), Vector2(9, 9), Vector2(0, 9)]
 var yard_gradients: Array[GradientTexture2D] = []
 var colors: Dictionary = Tokens.player_colors()
 var cell_gradients: Dictionary = {}
+var yard_trims: Array[StyleBoxFlat] = []
 
 func _ready() -> void:
 	theme = Tokens
@@ -29,12 +30,18 @@ func _ready() -> void:
 		texture.fill_from = Vector2.ZERO
 		texture.fill_to = Vector2(0.35, 1.0)
 		yard_gradients.append(texture)
-	# Small cached textures give every tile a lit face without per-frame work.
+		var trim := StyleBoxFlat.new()
+		trim.bg_color = Color(color.darkened(0.20),0.10)
+		trim.border_color = Color(Color.WHITE,0.24)
+		trim.set_border_width_all(2)
+		trim.set_corner_radius_all(20)
+		yard_trims.append(trim)
+	# Restrained gradients read as matte card stock, with one shared light direction.
 	for color in [Tokens.cell_white, Tokens.red, Tokens.green, Tokens.blue, Tokens.yellow]:
 		var gradient := Gradient.new()
 		gradient.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
-		var shade: Color = color.darkened(0.035 if color != Tokens.cell_white else 0.02)
-		gradient.colors = PackedColorArray([color.lightened(0.035), color, shade])
+		var shade: Color = color.darkened(0.07 if color != Tokens.cell_white else 0.035)
+		gradient.colors = PackedColorArray([color.lightened(0.055), color, shade])
 		var texture := GradientTexture2D.new()
 		texture.gradient = gradient
 		texture.width = 64
@@ -53,6 +60,7 @@ func _draw() -> void:
 	for seat in range(4):
 		_draw_yard(seat, frame)
 	_draw_track()
+	_draw_lane_marks()
 	_draw_center()
 	# All arrows point INTO the appropriate home lane.
 	_draw_arrow(_cell_center(7, 0), Vector2.RIGHT, colors.coral)
@@ -81,14 +89,19 @@ func _draw_yard(seat: int, frame: StyleBoxFlat) -> void:
 		uvs.append((point - rect.position) / rect.size)
 	draw_polygon(points, PackedColorArray([Color.WHITE]), uvs, yard_gradients[seat])
 	var floor_rect := Rect2(rect.position + Vector2.ONE * CELL, Vector2.ONE * CELL * 4)
+	draw_style_box(yard_trims[seat],floor_rect.grow(10))
 	draw_style_box(get_theme_stylebox("yard_floor", "Board"), floor_rect)
-	# StyleBoxFlat has no inner shadow: a translucent inset border fakes it.
 	draw_style_box(get_theme_stylebox("yard_inset", "Board"), floor_rect.grow(-2))
-	# Keep existing dock markers until the token/slot section is approved.
+	# Recessed matte docks retain the exact existing pawn anchors.
 	for index in range(4):
 		var dock := BoardMath.world(BoardMath.COLORS[seat], 0, index)
 		var point := ORIGIN + Vector2(dock.x + 7.5, dock.z + 7.5) * CELL
-		draw_circle(point, CELL * 0.44, colors[BoardMath.COLORS[seat]])
+		var color: Color = colors[BoardMath.COLORS[seat]]
+		var radius := CELL*0.44
+		draw_circle(point,radius+2.0,Color(color.darkened(0.3),0.22),true,-1,true)
+		draw_circle(point,radius,color,true,-1,true)
+		draw_arc(point,radius-1.0,PI,TAU,40,Color(0.10,0.15,0.20,0.13),1.5,true)
+		draw_arc(point,radius-1.0,0,PI,40,Color(1,1,1,0.22),1.5,true)
 
 func cell_color(row: int, col: int) -> Color:
 	var color: Color = Tokens.cell_white
@@ -114,19 +127,19 @@ func _draw_track() -> void:
 	for row in range(15):
 		for col in range(15):
 			if _is_track(row, col):
-				var rect := Rect2(ORIGIN + Vector2(col, row) * CELL, Vector2.ONE * CELL)
+				var rect := _cell_rect(row,col)
 				var color := cell_color(row, col)
 				draw_texture_rect(cell_gradients[color],rect,false)
-				# Inset highlights and a lower lip read as a shallow raised tile.
-				var inset := rect.grow(-2.0)
-				draw_line(inset.position,inset.position+Vector2(inset.size.x,0),Color(1,1,1,0.42),2.0,true)
-				draw_line(inset.position,inset.position+Vector2(0,inset.size.y),Color(1,1,1,0.23),2.0,true)
-				draw_line(inset.position+Vector2(0,inset.size.y),inset.end,Color(0.02,0.04,0.10,0.22),3.0,true)
+				# All bevels sit inside their cell; no offset or accumulated rounding.
+				var inset := rect.grow(-1.75)
+				draw_line(inset.position,inset.position+Vector2(inset.size.x,0),Color(1,1,1,0.40),1.25,true)
+				draw_line(inset.position,inset.position+Vector2(0,inset.size.y),Color(1,1,1,0.22),1.25,true)
+				draw_line(inset.position+Vector2(0,inset.size.y),inset.end,Color(0.02,0.04,0.10,0.10),1.5,true)
 	for row in range(15):
 		for col in range(15):
 			if not _is_track(row, col):
 				continue
-			var rect := Rect2(ORIGIN + Vector2(col, row) * CELL, Vector2.ONE * CELL)
+			var rect := _cell_rect(row,col)
 			var color := cell_color(row, col)
 			# Draw shared edges once for even, thin lines at mobile sizes.
 			draw_line(rect.position, rect.position + Vector2(CELL, 0), Tokens.grid_ink, Tokens.grid_width, true)
@@ -138,25 +151,45 @@ func _draw_track() -> void:
 			if BoardMath.TRACK.find([row, col]) in BoardMath.SAFE:
 				_draw_star(rect.get_center(), Tokens.safe_ink if color == Tokens.cell_white else Tokens.safe_on_color)
 
+func _cell_rect(row: int, col: int) -> Rect2:
+	return Rect2(ORIGIN+Vector2(col,row)*CELL,Vector2.ONE*CELL)
+
 func _cell_center(row: int, col: int) -> Vector2:
-	return ORIGIN + Vector2(col + 0.5, row + 0.5) * CELL
+	return _cell_rect(row,col).get_center()
+
+func _draw_lane_marks() -> void:
+	var directions := [Vector2.RIGHT,Vector2.DOWN,Vector2.LEFT,Vector2.UP]
+	for step in [2,4]:
+		var cells := [Vector2i(7,step),Vector2i(step,7),Vector2i(7,14-step),Vector2i(14-step,7)]
+		for seat in range(4):
+			var at := _cell_center(cells[seat].x,cells[seat].y)
+			var direction: Vector2 = directions[seat]
+			var side := Vector2(-direction.y,direction.x)
+			var points := PackedVector2Array([at-direction*6+side*6,at+direction*3,at-direction*6-side*6])
+			draw_polyline(points,Color(1,1,1,0.42),2.0,true)
 
 func _draw_star(at: Vector2, ink: Color) -> void:
 	var points := PackedVector2Array()
 	for index in range(10):
 		var angle := index * TAU / 10 - PI / 2
-		var radius := CELL * (0.42 if index % 2 == 0 else 0.19)
+		var radius := CELL * (0.36 if index % 2 == 0 else 0.165)
 		points.append(at + Vector2(cos(angle), sin(angle)) * radius)
+	draw_colored_polygon(points,Color(ink,0.08))
 	points.append(points[0])
 	draw_polyline(points, ink, Tokens.symbol_width, true)
 
 func _draw_arrow(at: Vector2, direction: Vector2, color: Color) -> void:
 	# A darker print keeps even the yellow arrow legible on white.
-	var ink := color.darkened(0.24)
+	var ink := color.lerp(Color("263b50"),0.42)
 	var side := Vector2(-direction.y, direction.x)
-	var tip := at + direction * CELL * 0.29
-	draw_line(at - direction * CELL * 0.29, tip, ink, Tokens.symbol_width + 1, true)
-	draw_polyline(PackedVector2Array([at + side * CELL * 0.18, tip, at - side * CELL * 0.18]), ink, Tokens.symbol_width + 1, true)
+	var points := PackedVector2Array([
+		at-direction*17-side*2,at+direction*2-side*2,
+		at+direction*2-side*10,at+direction*18,
+		at+direction*2+side*10,at+direction*2+side*2,at-direction*17+side*2
+	])
+	draw_colored_polygon(points,ink)
+	points.append(points[0])
+	draw_polyline(points,ink,1.0,true)
 
 func _draw_center() -> void:
 	var center := _cell_center(7, 7)
@@ -169,4 +202,10 @@ func _draw_center() -> void:
 		var color: Color = colors[BoardMath.COLORS[seat]]
 		draw_polygon(PackedVector2Array([a, b, center]), PackedColorArray([color.darkened(Tokens.center_shade), color, color.lightened(Tokens.center_highlight)]))
 	for corner in corners:
-		draw_line(center, corner, Color(Tokens.grid_ink, 0.65), Tokens.grid_width, true)
+		draw_line(center,corner,Color(Color("354655"),0.40),Tokens.grid_width,true)
+	var border := PackedVector2Array(corners)
+	border.append(border[0])
+	draw_polyline(border,Tokens.grid_ink,Tokens.grid_width,true)
+	# A tiny ivory join finishes the four inlaid panels without creating a cell.
+	var join := PackedVector2Array([center+Vector2(0,-7),center+Vector2(7,0),center+Vector2(0,7),center+Vector2(-7,0)])
+	draw_colored_polygon(join,Tokens.cell_white)
