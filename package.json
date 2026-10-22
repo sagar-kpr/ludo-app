@@ -13,6 +13,7 @@
     "godot:test:captures": "node scripts/godot.mjs test:captures",
     "godot:test:computer": "node scripts/test-godot.mjs computer",
     "godot:test:computer:browser": "npm run godot:build:web && node scripts/test-godot-computer-browser.mjs",
+    "godot:test:avatars": "npm run godot:build:web && node scripts/test-godot-computer-browser.mjs --avatars",
     "godot:test:lives": "node scripts/test-godot.mjs lives",
     "godot:test:devices": "npm run godot:build:web && node scripts/test-godot-client-devices.mjs",
     "godot:test:keyboard": "npm run godot:build:web && node scripts/test-godot-keyboard.mjs",

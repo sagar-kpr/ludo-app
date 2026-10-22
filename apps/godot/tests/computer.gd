@@ -43,7 +43,8 @@ func run() -> void:
 		return
 	var opponent: Dictionary = players[1]
 	check(opponent.get("isComputer",false) and opponent.color == "mint","Computer occupies the opposite corner")
-	check(client.cards[2].player_id == opponent.id and client.cards[2].name_label.text == "Computer","Existing profile card identifies the computer")
+	check(client.cards[2].player_id == opponent.id and client.cards[2].name_label.text == "A.I","Existing profile card identifies A.I")
+	check(client.cards[2].avatar.computer and client.cards[2].avatar.portrait.texture == null,"A.I keeps its robot avatar independently of human presets")
 	check(not client.cards[2].gift.visible and not client.cards[2].camera_button.visible and not client.cards[0].chat.visible,"Computer match hides unused social controls")
 	check(client.cards[0].camera_button.visible and client.cards[0].leave_button.visible,"Settings and leaving stay available")
 	check(client.board.pawns.size() == 8,"The existing board renders both players' four pawns")

@@ -9,6 +9,7 @@ signal camera_pressed
 const Design = preload("res://scripts/design.gd")
 const Dice = preload("res://scripts/dice.gd")
 const Avatar = preload("res://scripts/avatar.gd")
+const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
 const ProfileAction = preload("res://scripts/profile_action.gd")
 const TimeoutLives = preload("res://scripts/timeout_lives.gd")
 const ProfileFrame = preload("res://scripts/profile_frame.gd")
@@ -215,9 +216,11 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	departed = bool(player.get("departed",false))
 	player_id = str(player.get("id", ""))
 	turn_own = own
-	name_label.text = str(player.get("name","Open seat"))
+	name_label.text = "A.I" if player.get("isComputer",false) else str(player.get("name","Open seat"))
 	var accent: Color = Design.COLORS.get(player.get("color",""),Color("789484"))
 	avatar.configure(accent,str(player.get("name","")).hash(),not player.is_empty())
+	avatar.computer = bool(player.get("isComputer",false))
+	avatar.set_portrait(AvatarCatalog.texture_for(str(player.get("avatarId",""))) if not player.is_empty() and not avatar.computer else null)
 	panel.timer_color = accent
 	lives.accent = accent
 	lives.visible = not player.is_empty()
@@ -232,7 +235,7 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.content_margin_bottom = 10 if compact_height else 13
 	panel.add_theme_stylebox_override("panel",style)
 	var computer := bool(player.get("isComputer",false))
-	status_label.text = "CPU" if computer else "You" if own else "" if not player.is_empty() else "Waiting"
+	status_label.text = "A.I" if computer else "You" if own else "" if not player.is_empty() else "Waiting"
 	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))
 	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
 	roll.visible = active and not departed

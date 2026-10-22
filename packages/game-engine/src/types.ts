@@ -1,6 +1,6 @@
 export type Color = 'coral' | 'sun' | 'mint' | 'violet';
 export type Token = { id: string; color: Color; position: number };
-export type Player = { id: string; name: string; color: Color; ready: boolean; isComputer?: boolean };
+export type Player = { id: string; name: string; color: Color; ready: boolean; isComputer?: boolean; avatarId?: string };
 export type GameState = {
   players: Player[];
   departedPlayers?: Player[];

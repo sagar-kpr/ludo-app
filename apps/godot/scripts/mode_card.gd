@@ -29,7 +29,7 @@ func _ready() -> void:
 	column.offset_bottom = -18
 	column.add_theme_constant_override("separation",7)
 	add_child(column)
-	for item in [["1 VS 1" if computer else "2–4 PLAYERS",11,accent],["Play with AI" if computer else "Play with Friends",18,Color.WHITE],["Your computer opponent" if computer else "Online · Private rooms",12,Color("c7d6e6")]]:
+	for item in [["1 VS 1" if computer else "2–4 PLAYERS",11,accent],["Play with A.I" if computer else "Play with Friends",18,Color.WHITE],["Your A.I opponent" if computer else "Online · Private rooms",12,Color("c7d6e6")]]:
 		var caption := Label.new()
 		caption.text = item[0]
 		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

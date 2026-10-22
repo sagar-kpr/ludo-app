@@ -10,7 +10,7 @@ import { persistChat, persistRoom, persistenceEnabled } from './persistence';
 import { turnTimeoutAction } from './turn-clock';
 import { chooseComputerToken } from './computer-player';
 
-type ClientMessage = { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM' | 'CREATE_COMPUTER_GAME'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
+type ClientMessage = { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM' | 'CREATE_COMPUTER_GAME'; name: string; avatarId?: string } | { type: 'JOIN_ROOM'; code: string; name: string; avatarId?: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
 type Client = { socket: WebSocket; playerId: string; sessionToken: string; roomCode?: string; disconnectTimer?: ReturnType<typeof setTimeout> };
 type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number; computerId?: string; computerActionAt?: number };
 const COMPUTER_THINK_MS = 550;
@@ -85,12 +85,15 @@ setInterval(() => {
 const fail = (socket: WebSocket, message: string) => send(socket, { type: 'ERROR', message });
 const stickers = new Set<string>(STICKERS);
 
-function createRoom(client: Client, name: string, computer = false) {
+function avatarMetadata(value: unknown): Pick<Player, 'avatarId'> {
+  return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}\.(png|jpg|jpeg|webp)$/i.test(value) ? { avatarId: value } : {};
+}
+function createRoom(client: Client, name: string, computer = false, avatarId?: string) {
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
-  const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors[0], ready: true };
+  const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors[0], ready: true, ...avatarMetadata(avatarId) };
   const room: Room = { code: code(), players: [player], state: createGame([player]), clients: new Map([[client.playerId, client]]), createdAt: Date.now(), busyUntil: 0 };
   if (computer) {
-    const opponent: Player = { id: id('computer'), name: 'Computer', color: colors[1], ready: true, isComputer: true };
+    const opponent: Player = { id: id('computer'), name: 'A.I', color: colors[1], ready: true, isComputer: true };
     room.computerId = opponent.id;
     room.players.push(opponent);
     room.state = startGame(createGame(room.players));
@@ -98,14 +101,14 @@ function createRoom(client: Client, name: string, computer = false) {
   }
   client.roomCode = room.code; rooms.set(room.code, room); void persistRoom(room.code, room.players, room.state); send(client.socket, { type: 'ROOM_CREATED', roomCode: room.code, playerId: client.playerId }); state(room);
 }
-function joinRoom(client: Client, value: string, name: string) {
+function joinRoom(client: Client, value: string, name: string, avatarId?: string) {
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
   const room = rooms.get(value.toUpperCase());
   if (!room) return fail(client.socket, 'Room not found. Check the invite code.');
-  if (room.computerId) return fail(client.socket, 'This is a computer match. Create or join a friend room instead.');
+  if (room.computerId) return fail(client.socket, 'This is an A.I match. Create or join a friend room instead.');
   if (room.players.length >= 4) return fail(client.socket, 'This room is full.');
   if (room.state.phase !== 'lobby') return fail(client.socket, 'This match has already started.');
-  const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors.find(color => !room.players.some(player => player.color === color))!, ready: true };
+  const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors.find(color => !room.players.some(player => player.color === color))!, ready: true, ...avatarMetadata(avatarId) };
   room.players.push(player); room.state = { ...createGame(room.players), version: room.state.version + 1 }; room.clients.set(client.playerId, client); client.roomCode = room.code; void persistRoom(room.code, room.players, room.state); send(client.socket, { type: 'ROOM_JOINED', roomCode: room.code, playerId: client.playerId }); state(room);
 }
 function applyMove(room: Room, tokenId: string, automatic = false, presentationMs = DICE_ROLL_MS, timedOut = false) {
@@ -176,9 +179,9 @@ function removeRoomPlayer(room: Room, playerId: string, client?: Client, acknowl
 function handle(client: Client, message: ClientMessage) {
   if (message.type === 'PING') { send(client.socket, { type: 'PONG', serverTime: Date.now() }); return; }
   if (message.type === 'SYNC_STATE') { syncState(client); return; }
-  if (message.type === 'CREATE_ROOM') return createRoom(client, message.name);
-  if (message.type === 'CREATE_COMPUTER_GAME') return createRoom(client, message.name, true);
-  if (message.type === 'JOIN_ROOM') return joinRoom(client, message.code, message.name);
+  if (message.type === 'CREATE_ROOM') return createRoom(client, message.name, false, message.avatarId);
+  if (message.type === 'CREATE_COMPUTER_GAME') return createRoom(client, message.name, true, message.avatarId);
+  if (message.type === 'JOIN_ROOM') return joinRoom(client, message.code, message.name, message.avatarId);
   if (!client.roomCode) return fail(client.socket, 'Join a room first.');
   const room = rooms.get(client.roomCode); if (!room) return fail(client.socket, 'Room expired.');
   if (message.type === 'LEAVE_GAME') return leaveRoom(client, true);

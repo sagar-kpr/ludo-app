@@ -11,6 +11,12 @@ const ChatBubbles = preload("res://scripts/chat_bubbles.gd")
 const StickerArt = preload("res://scripts/sticker_art.gd")
 const StickerEffect = preload("res://scripts/sticker_effect.gd")
 const ModeCard = preload("res://scripts/mode_card.gd")
+const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
+var selected_avatar := ""
+var avatar_button: Button
+var avatar_preview: TextureRect
+var avatar_picker: PopupPanel
+var avatar_grid: GridContainer
 var feedback
 var chat_bubbles
 var network
@@ -156,6 +162,7 @@ func configure_web_field(input: LineEdit) -> void:
 func _ready() -> void:
 	theme = Design.make_theme()
 	config.load("user://preferences.cfg")
+	selected_avatar = str(config.get_value("player","avatar",""))
 	reduced_motion = bool(config.get_value("accessibility", "reduced_motion", false))
 	endpoint = str(ProjectSettings.get_setting("rally/realtime_url"))
 	for argument in OS.get_cmdline_user_args():
@@ -394,7 +401,7 @@ func build_ui() -> void:
 	var headline := label("Choose your table",30,Design.INK)
 	headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(headline)
-	var intro := label("Bring your friends or take on the computer.",15,Color("b9cde2"))
+	var intro := label("Bring your friends or take on A.I.",15,Color("b9cde2"))
 	intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(intro)
 	var modes := HBoxContainer.new()
@@ -410,12 +417,29 @@ func build_ui() -> void:
 	computer_button.name = "ComputerMode"
 	computer_button.computer = true
 	computer_button.reduced_motion = reduced_motion
-	computer_button.tooltip_text = "Play with AI · One-on-one against the computer. Internet connection required."
+	computer_button.tooltip_text = "Play with A.I · One-on-one against A.I. Internet connection required."
 	computer_button.pressed.connect(func(): request_room(false,true))
 	modes.add_child(computer_button)
 	var dashboard_footer := label("One board. Good company. Your next win.",13,Color("99b5d1"))
 	dashboard_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(dashboard_footer)
+	avatar_button = secondary_button("Choose avatar",open_avatar_picker)
+	avatar_button.custom_minimum_size.y = 56
+	avatar_button.expand_icon = true
+	avatar_button.add_theme_constant_override("icon_max_width",40)
+	avatar_preview = TextureRect.new()
+	avatar_preview.texture = AvatarCatalog.texture_for(selected_avatar)
+	avatar_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	avatar_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	avatar_preview.material = AvatarCatalog.rounded_material()
+	avatar_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	avatar_button.add_child(avatar_preview)
+	avatar_preview.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
+	avatar_preview.offset_left = 12
+	avatar_preview.offset_right = 60
+	avatar_preview.offset_top = -24
+	avatar_preview.offset_bottom = 24
+	dashboard.add_child(avatar_button)
 	friends_setup = VBoxContainer.new()
 	friends_setup.add_theme_constant_override("separation",18)
 	friends_setup.hide()
@@ -549,6 +573,41 @@ func build_ui() -> void:
 	add_child(sticker_layer)
 
 func build_dialogs() -> void:
+	avatar_picker = PopupPanel.new()
+	avatar_picker.theme = theme
+	var avatar_surface := Design.surface(Color("14263f"),20,Color("426b91"))
+	avatar_surface.shadow_size = 0
+	avatar_surface.shadow_offset = Vector2.ZERO
+	avatar_picker.add_theme_stylebox_override("panel",avatar_surface)
+	avatar_picker.min_size = Vector2i(280,300)
+	add_child(avatar_picker)
+	var avatar_column := VBoxContainer.new()
+	avatar_column.add_theme_constant_override("separation",12)
+	avatar_picker.add_child(avatar_column)
+	var avatar_heading := HBoxContainer.new()
+	avatar_column.add_child(avatar_heading)
+	var avatar_title := label("Choose your avatar",20)
+	avatar_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	avatar_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	avatar_heading.add_child(avatar_title)
+	var avatar_close := secondary_button("Close",func(): avatar_picker.hide())
+	avatar_close.custom_minimum_size = Vector2(54,36)
+	avatar_heading.add_child(avatar_close)
+	var avatar_hint := label("Pick your player portrait.",14,Design.MUTED)
+	avatar_hint.autowrap_mode = TextServer.AUTOWRAP_OFF
+	avatar_column.add_child(avatar_hint)
+	var avatar_scroll := ScrollContainer.new()
+	avatar_scroll.custom_minimum_size = Vector2(260,210)
+	avatar_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	avatar_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	avatar_column.add_child(avatar_scroll)
+	avatar_grid = GridContainer.new()
+	avatar_grid.columns = 3
+	avatar_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	avatar_grid.add_theme_constant_override("h_separation",10)
+	avatar_grid.add_theme_constant_override("v_separation",10)
+	avatar_scroll.add_child(avatar_grid)
+	avatar_column.add_child(secondary_button("Use default avatar",func(): select_avatar("")))
 	leave_dialog = ConfirmationDialog.new()
 	leave_dialog.title = "Leave game?"
 	leave_dialog.dialog_text = "Do you really want to leave the game?"
@@ -861,6 +920,48 @@ func show_sticker(event: Dictionary) -> void:
 	if str(event.get("fromPlayerId","")) == self_id:
 		notice.text = "Sticker delivered: " + effect.kind.to_lower()
 
+func open_avatar_picker() -> void:
+	for child in avatar_grid.get_children():
+		avatar_grid.remove_child(child)
+		child.queue_free()
+	for id in AvatarCatalog.names():
+		var choice := button("",func(): select_avatar(id))
+		choice.custom_minimum_size = Vector2(76,84)
+		choice.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		choice.icon = AvatarCatalog.texture_for(id)
+		choice.expand_icon = true
+		choice.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		choice.add_theme_constant_override("icon_max_width",72)
+		choice.tooltip_text = id.get_basename().replace("_"," ").capitalize()
+		var portrait := TextureRect.new()
+		portrait.texture = choice.icon
+		choice.icon = null
+		portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		portrait.material = AvatarCatalog.rounded_material()
+		portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		choice.add_child(portrait)
+		portrait.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		portrait.offset_left = 6
+		portrait.offset_top = 6
+		portrait.offset_right = -6
+		portrait.offset_bottom = -6
+		if id == AvatarCatalog.resolve_id(selected_avatar):
+			choice.add_theme_stylebox_override("normal",Design.surface(Color("1f466b"),14,Design.GOLD))
+		avatar_grid.add_child(choice)
+	var picker_size := Vector2i(mini(360,int(get_viewport_rect().size.x)-24),mini(420,int(get_viewport_rect().size.y)-40))
+	avatar_picker.popup(Rect2i((Vector2i(get_viewport_rect().size)-picker_size)/2,picker_size))
+	avatar_picker.size = picker_size
+	avatar_picker.position = (Vector2i(get_viewport_rect().size)-picker_size)/2
+
+func select_avatar(id: String) -> void:
+	selected_avatar = id
+	config.set_value("player","avatar",id)
+	config.save("user://preferences.cfg")
+	avatar_preview.texture = AvatarCatalog.texture_for(id)
+	avatar_button.text = "Choose avatar" if id.is_empty() else "Change avatar"
+	avatar_picker.hide()
+
 func show_friends_setup(show_friends: bool) -> void:
 	sync_web_form()
 	if setup_transition and setup_transition.is_valid():
@@ -891,9 +992,9 @@ func request_room(join: bool, computer: bool = false) -> void:
 		notice.text = "Enter your friend’s room code first."
 		return
 	if computer:
-		send({"type":"CREATE_COMPUTER_GAME", "name":player_name})
+		send({"type":"CREATE_COMPUTER_GAME", "name":player_name,"avatarId":AvatarCatalog.resolve_id(selected_avatar)})
 	else:
-		send({"type":"JOIN_ROOM", "code":code, "name":player_name} if join else {"type":"CREATE_ROOM", "name":player_name})
+		send({"type":"JOIN_ROOM", "code":code, "name":player_name,"avatarId":AvatarCatalog.resolve_id(selected_avatar)} if join else {"type":"CREATE_ROOM", "name":player_name,"avatarId":AvatarCatalog.resolve_id(selected_avatar)})
 
 func send(intent: Dictionary) -> void:
 	if pending or presenting:

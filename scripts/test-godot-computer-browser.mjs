@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync,readdirSync} from 'node:fs';
 import {chromium} from '@playwright/test';
 
 async function freePort() {
@@ -46,6 +46,21 @@ try {
   assert(await page.locator('#rally-name').isHidden(),'Mode dashboard hides the room form');
   mkdirSync('test-results',{recursive:true});
   await page.screenshot({path:'test-results/computer-mobile-home.png'});
+  let chosenAvatar;
+  if(process.argv.includes('--avatars')) {
+    const presets=readdirSync('apps/godot/assets/avatars').filter(name=>/\.(png|jpg|jpeg|webp)$/i.test(name)).sort();
+    assert(presets.length>=2,'Avatar regression uses at least two presets');
+    await page.touchscreen.tap(196,546);
+    await page.waitForTimeout(500);
+    await page.screenshot({path:'test-results/avatar-picker-mobile.png'});
+    await page.touchscreen.tap(196,360);
+    chosenAvatar=presets[1];
+    // Godot flushes saved preferences into the browser's IndexedDB asynchronously.
+    await page.waitForTimeout(6500);
+    await page.reload();
+    await page.waitForFunction(()=>document.querySelector('#rally-name')&&!document.querySelector('#status')&&window.__events.some(event=>event.type==='CONNECTED'),null,{timeout:45000});
+    await page.waitForTimeout(500);
+  }
   // Tap the real right-hand AI card, with no name or room fields required.
   await page.touchscreen.tap(290,345);
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='STATE'&&event.state.players.some(player=>player.isComputer)),null,{timeout:15000});
@@ -53,6 +68,7 @@ try {
   assert.equal(match.players.length,2);
   assert.equal(match.phase,'rolling');
   assert.equal(match.players[0].name,'Guest');
+  if(chosenAvatar)assert.equal(match.players[0].avatarId,chosenAvatar,'Chosen preset survives reload and reaches the server');
   await page.waitForFunction(()=>[...document.querySelectorAll('#rally-input-layer input')].every(input=>input.hidden));
   // The canvas start tap exercises real UI input; subsequent messages exercise
   // the unchanged browser presentation queue with authoritative bot events.
@@ -61,7 +77,7 @@ try {
   const rolls=await page.evaluate(id=>window.__events.filter(event=>event.type==='DICE_ROLLED'&&event.playerId===id).map(event=>event.value),match.players[1].id);
   assert.deepEqual(rolls,[6,6,5]);
   await page.waitForTimeout(4000);
-  await page.screenshot({path:'test-results/computer-mobile-match.png'});
+  await page.screenshot({path:chosenAvatar?'test-results/avatar-match-mobile.png':'test-results/computer-mobile-match.png'});
   await page.evaluate(()=>window.__gameSocket.send(JSON.stringify({type:'LEAVE_GAME'})));
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='LEFT_ROOM'),null,{timeout:15000});
   await page.waitForTimeout(1800);
