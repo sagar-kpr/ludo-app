@@ -34,7 +34,19 @@ try {
     const Original=window.WebSocket;
     window.__events=[];
     window.WebSocket=class extends Original {
-      constructor(...args){super(...args);window.__gameSocket=this;this.addEventListener('message',event=>window.__events.push(JSON.parse(event.data)));}
+      constructor(...args){
+        super(...args);window.__gameSocket=this;
+        this.addEventListener('message',event=>{
+          const message=JSON.parse(event.data);
+          if(window.__holdRoomMessages&&!event.__released&&['ROOM_CREATED','STATE'].includes(message.type)) {
+            event.stopImmediatePropagation();
+            const released=new MessageEvent('message',{data:event.data});
+            released.__released=true;
+            setTimeout(()=>this.dispatchEvent(released),1500);
+          }
+        });
+        this.addEventListener('message',event=>window.__events.push(JSON.parse(event.data)));
+      }
     };
   });
   const page=await context.newPage(),errors=[];
@@ -43,14 +55,15 @@ try {
   await page.goto(`http://127.0.0.1:${previewPort}`);
   await page.waitForFunction(()=>document.querySelector('#rally-name')&&!document.querySelector('#status'),null,{timeout:45000});
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='CONNECTED'));
-  assert(await page.locator('#rally-name').isHidden(),'Mode dashboard hides the room form');
+  assert(await page.locator('#rally-name').isVisible(),'Dashboard shows the shared player name');
+  assert(await page.locator('#rally-code').isHidden(),'Room code stays inside Friends setup');
   mkdirSync('test-results',{recursive:true});
   await page.screenshot({path:'test-results/computer-mobile-home.png'});
   let chosenAvatar;
   if(process.argv.includes('--avatars')) {
     const presets=readdirSync('apps/godot/assets/avatars').filter(name=>/\.(png|jpg|jpeg|webp)$/i.test(name)).sort();
     assert(presets.length>=2,'Avatar regression uses at least two presets');
-    await page.touchscreen.tap(196,546);
+    await page.touchscreen.tap(70,258);
     await page.waitForTimeout(500);
     await page.screenshot({path:'test-results/avatar-picker-mobile.png'});
     await page.touchscreen.tap(196,360);
@@ -62,11 +75,15 @@ try {
     await page.waitForTimeout(500);
   }
   // Tap the real right-hand AI card, with no name or room fields required.
-  await page.touchscreen.tap(290,345);
+  await page.evaluate(()=>window.__holdRoomMessages=true);
+  await page.touchscreen.tap(290,472);
+  await page.waitForTimeout(160);
+  await page.screenshot({path:'test-results/loading-ai-mobile.png'});
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='STATE'&&event.state.players.some(player=>player.isComputer)),null,{timeout:15000});
   const match=await page.evaluate(()=>window.__events.find(event=>event.type==='STATE'&&event.state.players.some(player=>player.isComputer)).state);
   assert.equal(match.players.length,2);
   assert.equal(match.phase,'rolling');
+  await page.evaluate(()=>window.__holdRoomMessages=false);
   assert.equal(match.players[0].name,'Guest');
   if(chosenAvatar)assert.equal(match.players[0].avatarId,chosenAvatar,'Chosen preset survives reload and reaches the server');
   await page.waitForFunction(()=>[...document.querySelectorAll('#rally-input-layer input')].every(input=>input.hidden));
@@ -81,9 +98,10 @@ try {
   await page.evaluate(()=>window.__gameSocket.send(JSON.stringify({type:'LEAVE_GAME'})));
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='LEFT_ROOM'),null,{timeout:15000});
   await page.waitForTimeout(1800);
-  assert(await page.locator('#rally-name').isHidden(),'Leaving returns to the mode dashboard');
-  await page.touchscreen.tap(100,345);
-  await page.locator('#rally-name').waitFor({state:'visible'});
+  assert(await page.locator('#rally-name').isVisible(),'Leaving returns to the dashboard profile');
+  await page.touchscreen.tap(100,472);
+  await page.locator('#rally-code').waitFor({state:'visible'});
+  assert(await page.locator('#rally-name').isHidden(),'Friends screen contains room controls only');
   assert.deepEqual(await page.evaluate(()=>window.__events.filter(event=>event.type==='ERROR')),[]);
   assert.deepEqual(errors,[],'No browser or Godot runtime errors');
   console.log('Computer mobile browser checks passed: real start-button tap, opponent turns, shared dice limit, rendering and return home.');

@@ -12,11 +12,16 @@ const StickerArt = preload("res://scripts/sticker_art.gd")
 const StickerEffect = preload("res://scripts/sticker_effect.gd")
 const ModeCard = preload("res://scripts/mode_card.gd")
 const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
+const LoadingSpinner = preload("res://scripts/loading_spinner.gd")
+var loading_overlay: Control
+var loading_label: Label
+var room_loading := false
 var selected_avatar := ""
 var avatar_button: Button
 var avatar_preview: TextureRect
 var avatar_picker: PopupPanel
 var avatar_grid: GridContainer
+var avatar_scroll: ScrollContainer
 var feedback
 var chat_bubbles
 var network
@@ -112,11 +117,14 @@ func sync_web_form() -> void:
 	var fields: Array = []
 	for entry in [[name_input,"rally-name","Your player name",18],[join_input,"rally-code","Friend’s room code",9]]:
 		var input: LineEdit = entry[0]
+		# During loading, draw the engine field behind the modal while its
+		# browser overlay is hidden, so the background form stays complete.
+		input.modulate.a = 1.0 if is_instance_valid(loading_overlay) and loading_overlay.visible else 0.0
 		var rect := input.get_global_rect()
-		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
+		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"visible":input.is_visible_in_tree() and not (is_instance_valid(loading_overlay) and loading_overlay.visible),"opacity":dashboard.modulate.a if input == name_input else friends_setup.modulate.a,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
 	var scroll := content.get_node("SetupScroll") as ScrollContainer
 	var clip := scroll.get_global_rect()
-	var data := {"fields":fields,"visible":friends_setup.is_visible_in_tree(),"opacity":friends_setup.modulate.a,"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
+	var data := {"fields":fields,"visible":home.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
 	var values: Variant = JSON.parse_string(str(JavaScriptBridge.eval("window.__rallyNativeInputs("+JSON.stringify(data)+")",true)))
 	if values is Dictionary:
 		# Keep text and controls at their normal width when a keyboard shortens
@@ -192,6 +200,8 @@ func _ready() -> void:
 		connection_detail = detail
 		if not online:
 			pending = false
+			room_loading = false
+			loading_overlay.hide()
 			if not room_code.is_empty():
 				connection_detail = "Connection lost · reconnecting…"
 		refresh_controls()
@@ -393,7 +403,7 @@ func build_ui() -> void:
 	dashboard.add_theme_constant_override("separation",22)
 	home.add_child(dashboard)
 	var breathing_room := Control.new()
-	breathing_room.custom_minimum_size.y = 38
+	breathing_room.custom_minimum_size.y = 12
 	dashboard.add_child(breathing_room)
 	var greeting := label("YOUR NEXT GREAT GAME",11,Color("8bc8ef"))
 	greeting.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -404,6 +414,50 @@ func build_ui() -> void:
 	var intro := label("Bring your friends or take on A.I.",15,Color("b9cde2"))
 	intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(intro)
+	var profile := panel(dashboard)
+	var identity_row := HBoxContainer.new()
+	identity_row.add_theme_constant_override("separation",16)
+	profile.add_child(identity_row)
+	var avatar_column := VBoxContainer.new()
+	avatar_column.add_theme_constant_override("separation",6)
+	identity_row.add_child(avatar_column)
+	avatar_button = secondary_button("",open_avatar_picker)
+	avatar_button.tooltip_text = "Choose avatar"
+	avatar_button.custom_minimum_size = Vector2(96,96)
+	avatar_column.add_child(avatar_button)
+	avatar_preview = TextureRect.new()
+	avatar_preview.texture = AvatarCatalog.texture_for(selected_avatar)
+	avatar_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	avatar_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	avatar_preview.material = AvatarCatalog.rounded_material()
+	avatar_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	avatar_button.add_child(avatar_preview)
+	avatar_preview.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	avatar_preview.offset_left = 5
+	avatar_preview.offset_right = -5
+	avatar_preview.offset_top = 5
+	avatar_preview.offset_bottom = -5
+	var avatar_caption := label("Change avatar",12,Color("b9cde2"))
+	avatar_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	avatar_column.add_child(avatar_caption)
+	var identity_fields := VBoxContainer.new()
+	identity_fields.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	identity_fields.alignment = BoxContainer.ALIGNMENT_CENTER
+	identity_fields.add_theme_constant_override("separation",8)
+	identity_row.add_child(identity_fields)
+	identity_fields.add_child(label("Your player name",14,Design.MUTED))
+	name_input = LineEdit.new()
+	name_input.placeholder_text = "Guest"
+	name_input.max_length = 18
+	name_input.text = str(config.get_value("player", "name", ""))
+	name_input.custom_minimum_size.y = 52
+	name_input.focus_mode = Control.FOCUS_ALL
+	name_input.mouse_filter = Control.MOUSE_FILTER_STOP
+	name_input.virtual_keyboard_enabled = true
+	name_input.focus_entered.connect(func(): scroll.ensure_control_visible(name_input))
+	configure_web_field(name_input)
+	identity_fields.add_child(name_input)
+	identity_fields.add_child(label("For Friends and A.I",12,Color("b9cde2")))
 	var modes := HBoxContainer.new()
 	modes.add_theme_constant_override("separation",14)
 	dashboard.add_child(modes)
@@ -411,7 +465,7 @@ func build_ui() -> void:
 	friends_button.name = "FriendsMode"
 	friends_button.reduced_motion = reduced_motion
 	friends_button.tooltip_text = "Play with Friends · Create or join a private online room"
-	friends_button.pressed.connect(func(): show_friends_setup(true))
+	friends_button.pressed.connect(open_friends_with_feedback)
 	modes.add_child(friends_button)
 	computer_button = ModeCard.new()
 	computer_button.name = "ComputerMode"
@@ -423,23 +477,6 @@ func build_ui() -> void:
 	var dashboard_footer := label("One board. Good company. Your next win.",13,Color("99b5d1"))
 	dashboard_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(dashboard_footer)
-	avatar_button = secondary_button("Choose avatar",open_avatar_picker)
-	avatar_button.custom_minimum_size.y = 56
-	avatar_button.expand_icon = true
-	avatar_button.add_theme_constant_override("icon_max_width",40)
-	avatar_preview = TextureRect.new()
-	avatar_preview.texture = AvatarCatalog.texture_for(selected_avatar)
-	avatar_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	avatar_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	avatar_preview.material = AvatarCatalog.rounded_material()
-	avatar_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	avatar_button.add_child(avatar_preview)
-	avatar_preview.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
-	avatar_preview.offset_left = 12
-	avatar_preview.offset_right = 60
-	avatar_preview.offset_top = -24
-	avatar_preview.offset_bottom = 24
-	dashboard.add_child(avatar_button)
 	friends_setup = VBoxContainer.new()
 	friends_setup.add_theme_constant_override("separation",18)
 	friends_setup.hide()
@@ -451,18 +488,6 @@ func build_ui() -> void:
 	friends_setup.add_child(label("Create a private table or join with a room code.",15,Design.MUTED))
 	home_card = panel(friends_setup)
 	home_card.add_theme_constant_override("separation", 22)
-	home_card.add_child(label("Your player name", 14, Design.MUTED))
-	name_input = LineEdit.new()
-	name_input.placeholder_text = "Guest"
-	name_input.max_length = 18
-	name_input.text = str(config.get_value("player", "name", ""))
-	name_input.custom_minimum_size.y = 60
-	name_input.focus_mode = Control.FOCUS_ALL
-	name_input.mouse_filter = Control.MOUSE_FILTER_STOP
-	name_input.virtual_keyboard_enabled = true
-	name_input.focus_entered.connect(func(): scroll.ensure_control_visible(name_input))
-	configure_web_field(name_input)
-	home_card.add_child(name_input)
 	create_button = button("Create a private room", func(): request_room(false))
 	create_button.custom_minimum_size.y = 60
 	home_card.add_child(create_button)
@@ -571,6 +596,28 @@ func build_ui() -> void:
 	sticker_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sticker_layer.z_index = 30
 	add_child(sticker_layer)
+	loading_overlay = Control.new()
+	loading_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	loading_overlay.z_index = 100
+	add_child(loading_overlay)
+	var dim := ColorRect.new()
+	dim.color = Color(0.02,0.04,0.08,0.28)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	loading_overlay.add_child(dim)
+	var loading_center := CenterContainer.new()
+	loading_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	loading_overlay.add_child(loading_center)
+	var loading_panel := PanelContainer.new()
+	loading_panel.add_theme_stylebox_override("panel",Design.surface(Color(0.07,0.14,0.24,0.94),18,Color("426b91")))
+	loading_center.add_child(loading_panel)
+	var loading_row := HBoxContainer.new()
+	loading_row.add_theme_constant_override("separation",12)
+	loading_panel.add_child(loading_row)
+	loading_row.add_child(LoadingSpinner.new())
+	loading_label = label("Opening…",16)
+	loading_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	loading_row.add_child(loading_label)
+	loading_overlay.hide()
 
 func build_dialogs() -> void:
 	avatar_picker = PopupPanel.new()
@@ -579,7 +626,7 @@ func build_dialogs() -> void:
 	avatar_surface.shadow_size = 0
 	avatar_surface.shadow_offset = Vector2.ZERO
 	avatar_picker.add_theme_stylebox_override("panel",avatar_surface)
-	avatar_picker.min_size = Vector2i(280,300)
+	avatar_picker.min_size = Vector2i(280,240)
 	add_child(avatar_picker)
 	var avatar_column := VBoxContainer.new()
 	avatar_column.add_theme_constant_override("separation",12)
@@ -596,7 +643,7 @@ func build_dialogs() -> void:
 	var avatar_hint := label("Pick your player portrait.",14,Design.MUTED)
 	avatar_hint.autowrap_mode = TextServer.AUTOWRAP_OFF
 	avatar_column.add_child(avatar_hint)
-	var avatar_scroll := ScrollContainer.new()
+	avatar_scroll = ScrollContainer.new()
 	avatar_scroll.custom_minimum_size = Vector2(260,210)
 	avatar_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	avatar_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -846,6 +893,8 @@ func open_leave_confirmation() -> void:
 		leave_dialog.popup_centered()
 
 func return_home() -> void:
+	room_loading = false
+	loading_overlay.hide()
 	room_code = ""
 	game = {}
 	latest_version = -1
@@ -920,7 +969,23 @@ func show_sticker(event: Dictionary) -> void:
 	if str(event.get("fromPlayerId","")) == self_id:
 		notice.text = "Sticker delivered: " + effect.kind.to_lower()
 
+func open_friends_with_feedback() -> void:
+	loading_label.text = "Opening Friends…"
+	loading_overlay.show()
+	await get_tree().process_frame
+	show_friends_setup(true)
+	if not reduced_motion and setup_transition and setup_transition.is_valid():
+		await setup_transition.finished
+	if not room_loading:
+		loading_overlay.hide()
+
+func finish_room_loading() -> void:
+	await get_tree().process_frame
+	room_loading = false
+	loading_overlay.hide()
+
 func open_avatar_picker() -> void:
+	avatar_scroll.custom_minimum_size.y = clampf(get_viewport_rect().size.y-210,80,210)
 	for child in avatar_grid.get_children():
 		avatar_grid.remove_child(child)
 		child.queue_free()
@@ -959,7 +1024,7 @@ func select_avatar(id: String) -> void:
 	config.set_value("player","avatar",id)
 	config.save("user://preferences.cfg")
 	avatar_preview.texture = AvatarCatalog.texture_for(id)
-	avatar_button.text = "Choose avatar" if id.is_empty() else "Change avatar"
+	avatar_button.tooltip_text = "Choose avatar" if id.is_empty() else "Change avatar"
 	avatar_picker.hide()
 
 func show_friends_setup(show_friends: bool) -> void:
@@ -1003,6 +1068,10 @@ func send(intent: Dictionary) -> void:
 		notice.text = "Cannot reach the game server."
 		return
 	pending = true
+	if intent.get("type","") in ["CREATE_ROOM","JOIN_ROOM","CREATE_COMPUTER_GAME"]:
+		room_loading = true
+		loading_label.text = "Starting A.I…" if intent.type == "CREATE_COMPUTER_GAME" else "Opening room…"
+		loading_overlay.show()
 	refresh_controls()
 
 func send_chat() -> void:
@@ -1057,6 +1126,8 @@ func present_event(event: Dictionary) -> void:
 				notice.text = "Timer expired with no chances left. You left the game."
 		"ERROR":
 			pending = false
+			room_loading = false
+			loading_overlay.hide()
 			notice.text = str(event.message)
 		"ROOM_CREATED", "ROOM_JOINED":
 			room_code = str(event.roomCode)
@@ -1089,6 +1160,8 @@ func present_event(event: Dictionary) -> void:
 			turn_duration_ms = int(event.get("turnDurationMs",30000))
 			pending = false
 			show_state()
+			if room_loading:
+				finish_room_loading()
 			# TOKEN_MOVED is followed by this authoritative snapshot. Do not
 			# re-enable input against the previous legal-pawn state in between.
 			if awaiting_move_state:

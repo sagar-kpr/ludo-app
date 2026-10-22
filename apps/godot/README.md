@@ -6,12 +6,16 @@ Android-specific LiveKit integration. The previous Expo client is preserved in
 
 ## Play vs Computer
 
-The home dashboard shows two illustrated mode cards. **Play with Friends** opens
-a separate screen with the existing player-name, create-room and join-code controls.
+The home dashboard shows a larger avatar selector and player-name field above two
+illustrated mode cards. Both modes use this shared identity. **Play with Friends**
+opens a separate screen containing create-room and join-code controls.
 Back navigation preserves entered values. **Play with AI** immediately starts a
 red-versus-yellow match against a server-controlled computer, using the saved
 player name or Guest. Leaving a game returns to the mode dashboard.
 This mode requires an internet connection and the updated game server.
+Mode navigation and room requests show a compact translucent loading overlay,
+which clears when the screen is ready or a request fails. In-game names sit
+above the profile frame, leaving room for larger portraits inside it.
 
 `scripts/mode_card.gd` draws the scalable dice/pawn and robot icons procedurally;
 no bitmap downloads are required. The navy dice-pattern background and gameplay

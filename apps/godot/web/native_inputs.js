@@ -111,7 +111,7 @@
           if (event.key !== 'Enter') return;
           event.preventDefault();
           const next = fields.get('rally-code');
-          if (field.id === 'rally-name' && next) next.focus({preventScroll:true});
+          if (field.id === 'rally-name' && next && !next.hidden) next.focus({preventScroll:true});
           else input.blur();
         });
         layer.append(input);
@@ -120,8 +120,10 @@
       // Browser edits own the value while focused, including IME composition.
       if (input.engineValue !== undefined && field.value !== input.engineValue && document.activeElement !== input) input.value = field.value;
       input.engineValue = field.value;
-      if (!data.visible && document.activeElement === input) input.blur();
-      input.hidden = !data.visible;
+      const visible = data.visible && field.visible !== false;
+      if (!visible && document.activeElement === input) input.blur();
+      input.hidden = !visible;
+      input.style.opacity = String(field.opacity ?? 1);
       values[field.id] = input.value;
     }
     placeFields();

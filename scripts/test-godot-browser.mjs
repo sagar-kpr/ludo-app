@@ -56,16 +56,14 @@ try {
   }
   mkdirSync('test-results',{recursive:true});
   await host.screenshot({path:'test-results/godot-home.png'});
-  for(const page of [host,friend]) {
-    await page.touchscreen.tap(105,365);
-    await page.locator('#rally-name').waitFor({state:'visible'});
-  }
   // Tap the actual canvas field on a touch device and type through the browser input.
   await host.locator('#rally-name').tap();
   await host.waitForFunction(()=>['INPUT','TEXTAREA'].includes(document.activeElement?.tagName));
   await host.locator('input:focus,textarea:focus').fill('Mobile Maya');
-  const nameRect=await host.locator('#rally-name').boundingBox();
-  await host.touchscreen.tap(nameRect.x+nameRect.width/2,nameRect.y+nameRect.height+22+30);
+  await host.touchscreen.tap(105,504);
+  await host.locator('#rally-code').waitFor({state:'visible'});
+  const hostCodeRect=await host.locator('#rally-code').boundingBox();
+  await host.touchscreen.tap(hostCodeRect.x+hostCodeRect.width/2,hostCodeRect.y-22-30);
   await host.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='ROOM_CREATED'));
   await host.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='STATE'&&event.state.players[0]?.name==='Mobile Maya'));
   // Network interception is test-only; the production client exposes no hooks.
@@ -74,6 +72,8 @@ try {
   }
   const code=await host.evaluate(()=>window.__ludoEvents.find(event=>event.type==='ROOM_CREATED').roomCode);
   await friend.locator('#rally-name').fill('Arjun');
+  await friend.touchscreen.tap(105,504);
+  await friend.locator('#rally-code').waitFor({state:'visible'});
   await friend.locator('#rally-code').tap();
   await friend.locator('#rally-code').fill(code.toLowerCase());
   const codeRect=await friend.locator('#rally-code').boundingBox();

@@ -14,6 +14,9 @@ Players choose from this collection using Choose avatar on the dashboard.
 Their choice is saved on that device/browser and sent as a preset filename when
 creating or joining a room, including Play with AI. No user uploads are offered.
 Deploy the updated game server to share avatar choices with other players.
+Player portraits and picker thumbnails use a shared rounded-square mask. The
+A.I opponent keeps its procedural robot portrait and is named A.I; human preset
+choices never replace it.
 
 Run `npm run godot:test:avatars` for mobile picker, saved selection, exported
 resource loading and computer-match smoke coverage.

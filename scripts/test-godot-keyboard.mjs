@@ -45,10 +45,7 @@ try {
   await page.goto(`http://127.0.0.1:${previewPort}`);
   await page.waitForFunction(()=>document.querySelector('#rally-name')&&!document.querySelector('#status'),null,{timeout:45000});
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='CONNECTED'));
-  assert(await page.locator('#rally-name').isHidden(),'Dashboard starts without room fields');
-  // The Friends card occupies the left half of the mode row.
-  await page.touchscreen.tap(100,345);
-  await page.locator('#rally-name').waitFor({state:'visible'});
+  assert(await page.locator('#rally-name').isVisible(),'Dashboard contains the name field');
   await page.evaluate(()=>{const update=window.__rallyNativeInputs;window.__rallyNativeInputs=data=>{window.__formData=structuredClone(data);return update(data);};});
   const baseline=await page.locator('#rally-name').boundingBox();
   assert(baseline.height>=44,'Normal name field has a usable touch height');
@@ -60,6 +57,7 @@ try {
       const bounds=canvas.getBoundingClientRect(),view=stage.getBoundingClientRect();
       for(const field of data.fields){
         const input=document.getElementById(field.id),rect=input.getBoundingClientRect();
+        if(input.hidden)continue;
         if(Math.abs(rect.x-(bounds.x+field.rect[0]*bounds.width/data.width))>1.5)return false;
         if(Math.abs(rect.y-(bounds.y+field.rect[1]*bounds.height/data.height))>1.5)return false;
         if(field.id===id&&(rect.top<view.top||rect.bottom>view.bottom||rect.height<44))return false;
@@ -76,7 +74,10 @@ try {
   mkdirSync('test-results',{recursive:true});
   await page.screenshot({path:'test-results/keyboard-name.png'});
   await page.locator('#rally-name').press('Enter');
-  await aligned('rally-code');
+  await aligned('');
+  await page.evaluate(()=>window.__keyboardViewport({width:393,height:852,pageTop:0,offsetTop:0}));
+  await page.touchscreen.tap(100,472);
+  await page.locator('#rally-code').waitFor({state:'visible'});
   await page.locator('#rally-code').fill('ABCD-EF12');
   await page.evaluate(()=>window.__keyboardViewport({height:370,pageTop:180,offsetTop:180}));
   await aligned('rally-code');
@@ -90,17 +91,23 @@ try {
   await page.setViewportSize({width:393,height:852});
   await page.evaluate(()=>window.__keyboardViewport({width:393,height:852,pageTop:0,offsetTop:0}));
   await aligned('');
-  await page.waitForFunction(y=>Math.abs(document.querySelector('#rally-name').getBoundingClientRect().y-y)<2,baseline.y);
   await page.screenshot({path:'test-results/keyboard-dismissed.png'});
   assert.equal(await page.locator('#rally-code').inputValue(),'ABCD-EF12','Room code survives keyboard changes');
 
+  await page.touchscreen.tap(100,52);
+  await page.locator('#rally-name').waitFor({state:'visible'});
+  await page.waitForFunction(y=>Math.abs(document.querySelector('#rally-name').getBoundingClientRect().y-y)<2,baseline.y);
+
   // Tap the real canvas button while a browser input still has focus.
   await page.locator('#rally-name').focus();
+  await page.touchscreen.tap(100,472);
+  await page.locator('#rally-code').waitFor({state:'visible'});
+  await page.locator('#rally-code').focus();
   await page.evaluate(()=>window.__keyboardViewport({height:420,pageTop:60,offsetTop:60}));
-  await aligned('rally-name');
+  await aligned('rally-code');
   const button=await page.evaluate(()=>{
-    const data=window.__formData,field=data.fields.find(field=>field.id==='rally-name'),bounds=document.querySelector('#canvas').getBoundingClientRect();
-    return {x:bounds.x+(field.rect[0]+field.rect[2]/2)*bounds.width/data.width,y:bounds.y+(field.rect[1]+field.rect[3]+22+30)*bounds.height/data.height};
+    const data=window.__formData,field=data.fields.find(field=>field.id==='rally-code'),bounds=document.querySelector('#canvas').getBoundingClientRect();
+    return {x:bounds.x+(field.rect[0]+field.rect[2]/2)*bounds.width/data.width,y:bounds.y+(field.rect[1]-22-30)*bounds.height/data.height};
   });
   await page.touchscreen.tap(button.x,button.y);
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='ROOM_CREATED'),null,{timeout:12000});

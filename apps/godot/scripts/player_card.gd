@@ -109,7 +109,8 @@ func _ready() -> void:
 	name_label.add_theme_color_override("font_color",Design.INK)
 	var heading := HBoxContainer.new()
 	heading.add_theme_constant_override("separation",8)
-	column.add_child(heading)
+	add_child(heading)
+	move_child(heading,0)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(name_label)
 	media_row = HBoxContainer.new()
@@ -197,8 +198,9 @@ func fit_width(available_width: float, viewport_height: float = 860.0, mobile_po
 	compact_height = viewport_height < 680.0 or compact_portrait
 	custom_minimum_size.x = minf(152.0 if compact_portrait else 156.0 if compact_height else 180.0,available_width)
 	var compact := available_width < 164.0
-	var portrait_size := 52.0 if compact_portrait else 50.0 if viewport_height < 450.0 else 56.0 if compact_height else 64.0 if compact else 72.0
+	var portrait_size := 68.0 if compact_portrait else 60.0 if viewport_height < 450.0 else 64.0 if compact_height else 72.0 if compact else 80.0
 	var dice_size := minf(portrait_size-1.0,54.0 if compact or compact_height else 68.0)
+	portrait_size = minf(portrait_size,custom_minimum_size.x-dice_size-(12.0 if compact or compact_height else 14.0)-16.0)
 	name_label.add_theme_font_size_override("font_size",13 if compact_portrait else 14)
 	set_rank(finish_rank)
 	avatar.custom_minimum_size = Vector2.ONE*portrait_size
@@ -229,8 +231,8 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.border_color = Color(accent,0.20) if active and not departed else Color("2a4059")
 	style.shadow_color = Color(accent,0.08) if active and not departed else Color(0.015,0.025,0.06,0.25)
 	style.shadow_size = 5 if active and not departed else 3
-	style.content_margin_left = 10
-	style.content_margin_right = 10
+	style.content_margin_left = 8
+	style.content_margin_right = 8
 	style.content_margin_top = 6 if compact_height else 8
 	style.content_margin_bottom = 10 if compact_height else 13
 	panel.add_theme_stylebox_override("panel",style)

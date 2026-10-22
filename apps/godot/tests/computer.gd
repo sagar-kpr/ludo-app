@@ -35,8 +35,10 @@ func run() -> void:
 	check(not client.computer_button.disabled,"Play vs Computer is available when connected")
 	client.name_input.text = "Solo player"
 	client.computer_button.pressed.emit()
+	check(client.loading_overlay.visible,"A.I launch immediately shows loading feedback")
 	check(await wait_until(func(): return client.game.get("phase") == "rolling" and not client.pending),"Computer button starts directly without waiting in a lobby")
 	var players: Array = client.game.get("players",[])
+	check(await wait_until(func(): return not client.loading_overlay.visible),"Loading feedback clears after the match is displayed")
 	check(players.size() == 2,"Match has one human and one computer")
 	if players.size() != 2:
 		finish()
