@@ -10,6 +10,7 @@ const Feedback = preload("res://scripts/feedback.gd")
 const ChatBubbles = preload("res://scripts/chat_bubbles.gd")
 const StickerArt = preload("res://scripts/sticker_art.gd")
 const StickerEffect = preload("res://scripts/sticker_effect.gd")
+const ModeCard = preload("res://scripts/mode_card.gd")
 var feedback
 var chat_bubbles
 var network
@@ -23,6 +24,9 @@ var using_landscape := false
 var content: VBoxContainer
 var home: VBoxContainer
 var home_card: VBoxContainer
+var dashboard: VBoxContainer
+var friends_setup: VBoxContainer
+var friends_button: Button
 var lobby: VBoxContainer
 var game_view: VBoxContainer
 var status: Label
@@ -32,6 +36,7 @@ var join_input: LineEdit
 var room_label: Label
 var lobby_players: Label
 var create_button: Button
+var computer_button: Button
 var join_button: Button
 var start_button: Button
 var cards: Array = []
@@ -54,6 +59,7 @@ var exit_scheduled := false
 var result: AcceptDialog
 var result_stats: Label
 var restart_button: Button
+var result_home_button: Button
 var connection_detail := "Connecting…"
 var config := ConfigFile.new()
 var reduced_motion := false
@@ -103,7 +109,7 @@ func sync_web_form() -> void:
 		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
 	var scroll := content.get_node("SetupScroll") as ScrollContainer
 	var clip := scroll.get_global_rect()
-	var data := {"fields":fields,"visible":home.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
+	var data := {"fields":fields,"visible":friends_setup.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
 	var values: Variant = JSON.parse_string(str(JavaScriptBridge.eval("window.__rallyNativeInputs("+JSON.stringify(data)+")",true)))
 	if values is Dictionary:
 		# Keep text and controls at their normal width when a keyboard shortens
@@ -210,8 +216,6 @@ func _safe_area() -> void:
 	content.get_child(0).visible = not game_view.visible
 	notice.visible = not game_view.visible
 	var available := get_viewport_rect().size
-	if is_instance_valid(home_card):
-		home_card.custom_minimum_size.y = maxf(420.0, available.y * 0.60)
 	if game_view.visible and is_instance_valid(board):
 		var width_limit := available.x-8.0
 		var mobile_portrait := available.x < 640.0
@@ -352,7 +356,7 @@ func build_ui() -> void:
 	center.add_child(content)
 	var header := HBoxContainer.new()
 	content.add_child(header)
-	var brand := label("✦  RALLY LUDO", 16, Design.INK)
+	var brand := label("RALLY LUDO", 16, Design.INK)
 	brand_label = brand
 	brand.autowrap_mode = TextServer.AUTOWRAP_OFF
 	header.add_child(brand)
@@ -376,10 +380,48 @@ func build_ui() -> void:
 	home = VBoxContainer.new()
 	home.add_theme_constant_override("separation", 18)
 	setup.add_child(home)
-	home.add_child(label("Roll into the moment.", 32, Design.INK))
-	home.add_child(label("Create a room or join your friends with a code.", 16, Design.MUTED))
-	home_card = panel(home)
-	home_card.alignment = BoxContainer.ALIGNMENT_CENTER
+	dashboard = VBoxContainer.new()
+	dashboard.add_theme_constant_override("separation",22)
+	home.add_child(dashboard)
+	var breathing_room := Control.new()
+	breathing_room.custom_minimum_size.y = 38
+	dashboard.add_child(breathing_room)
+	var greeting := label("YOUR NEXT GREAT GAME",11,Color("8bc8ef"))
+	greeting.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dashboard.add_child(greeting)
+	var headline := label("Choose your table",30,Design.INK)
+	headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dashboard.add_child(headline)
+	var intro := label("Bring your friends or take on the computer.",15,Color("b9cde2"))
+	intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dashboard.add_child(intro)
+	var modes := HBoxContainer.new()
+	modes.add_theme_constant_override("separation",14)
+	dashboard.add_child(modes)
+	friends_button = ModeCard.new()
+	friends_button.name = "FriendsMode"
+	friends_button.tooltip_text = "Play with Friends · Create or join a private online room"
+	friends_button.pressed.connect(func(): show_friends_setup(true))
+	modes.add_child(friends_button)
+	computer_button = ModeCard.new()
+	computer_button.name = "ComputerMode"
+	computer_button.computer = true
+	computer_button.tooltip_text = "Play with AI · One-on-one against the computer. Internet connection required."
+	computer_button.pressed.connect(func(): request_room(false,true))
+	modes.add_child(computer_button)
+	var dashboard_footer := label("One board. Good company. Your next win.",13,Color("99b5d1"))
+	dashboard_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dashboard.add_child(dashboard_footer)
+	friends_setup = VBoxContainer.new()
+	friends_setup.add_theme_constant_override("separation",18)
+	friends_setup.hide()
+	home.add_child(friends_setup)
+	var back := secondary_button("‹  Back to game modes",func(): show_friends_setup(false))
+	back.custom_minimum_size.y = 44
+	friends_setup.add_child(back)
+	friends_setup.add_child(label("Play with Friends",28,Design.INK))
+	friends_setup.add_child(label("Create a private table or join with a room code.",15,Design.MUTED))
+	home_card = panel(friends_setup)
 	home_card.add_theme_constant_override("separation", 22)
 	home_card.add_child(label("Your player name", 14, Design.MUTED))
 	name_input = LineEdit.new()
@@ -409,7 +451,7 @@ func build_ui() -> void:
 	join_button = secondary_button("Join with code", func(): request_room(true))
 	join_button.custom_minimum_size.y = 60
 	home_card.add_child(join_button)
-	home.add_child(label("Guest friendly  ·  Android + web  ·  2–4 players", 12, Design.MUTED))
+	friends_setup.add_child(label("Private rooms · 2–4 players · Share your code",12,Design.MUTED))
 	lobby = VBoxContainer.new()
 	lobby.add_theme_constant_override("separation", 16)
 	lobby.hide()
@@ -604,7 +646,10 @@ func build_dialogs() -> void:
 	results_column.add_child(result_stats)
 	restart_button = button("Restart game",func(): send({"type":"RESTART_GAME"}))
 	results_column.add_child(restart_button)
-	var results_footer := label("Same friends · Same room",12,Design.MUTED)
+	result_home_button = secondary_button("Back to home",func(): send({"type":"LEAVE_GAME"}))
+	result_home_button.hide()
+	results_column.add_child(result_home_button)
+	var results_footer := label("Play again · Same room",12,Design.MUTED)
 	results_footer.autowrap_mode = TextServer.AUTOWRAP_OFF
 	results_column.add_child(results_footer)
 
@@ -741,11 +786,12 @@ func return_home() -> void:
 	for dialog in [result,leave_dialog,chat_dialog,menu,sticker_picker]:
 		dialog.hide()
 	home.show()
+	show_friends_setup(false)
 	lobby.hide()
 	game_view.hide()
 	content.get_node("SetupScroll").show()
 	brand_label.add_theme_color_override("font_color",Design.INK)
-	notice.text = "You left the game. Create or join another room."
+	notice.text = "Choose a mode to play again."
 	_safe_area()
 
 func finish_departure_match(code: String) -> void:
@@ -802,7 +848,15 @@ func show_sticker(event: Dictionary) -> void:
 	if str(event.get("fromPlayerId","")) == self_id:
 		notice.text = "Sticker delivered: " + effect.kind.to_lower()
 
-func request_room(join: bool) -> void:
+func show_friends_setup(show_friends: bool) -> void:
+	sync_web_form()
+	dashboard.visible = not show_friends
+	friends_setup.visible = show_friends
+	notice.text = ""
+	content.get_node("SetupScroll").scroll_vertical = 0
+	sync_web_form.call_deferred()
+
+func request_room(join: bool, computer: bool = false) -> void:
 	sync_web_form()
 	var player_name := name_input.text.strip_edges()
 	if player_name.is_empty():
@@ -814,7 +868,10 @@ func request_room(join: bool) -> void:
 	if join and code.is_empty():
 		notice.text = "Enter your friend’s room code first."
 		return
-	send({"type":"JOIN_ROOM", "code":code, "name":player_name} if join else {"type":"CREATE_ROOM", "name":player_name})
+	if computer:
+		send({"type":"CREATE_COMPUTER_GAME", "name":player_name})
+	else:
+		send({"type":"JOIN_ROOM", "code":code, "name":player_name} if join else {"type":"CREATE_ROOM", "name":player_name})
 
 func send(intent: Dictionary) -> void:
 	if pending or presenting:
@@ -863,6 +920,7 @@ func present_event(event: Dictionary) -> void:
 				latest_version = -1
 				content.get_node("SetupScroll").show()
 				home.show()
+				show_friends_setup(false)
 				lobby.hide()
 				game_view.hide()
 				_safe_area()
@@ -999,6 +1057,7 @@ func show_state() -> void:
 					lines.append("%s  %s · %d/4 home" % [["1st","2nd","3rd","4th"][rank],str(player.name),home_count])
 		result_stats.text = "\n\n".join(lines)
 		var last_player: bool = players.size() == 1 and not game.get("departedPlayers",[]).is_empty()
+		result_home_button.visible = players.any(func(player: Dictionary): return bool(player.get("isComputer",false)))
 		restart_button.visible = not last_player and not players.is_empty() and players[0].id == self_id
 		if last_player:
 			result_stats.text = str(players[0].name) + " wins!\n\nReturning to home…"
@@ -1018,9 +1077,16 @@ func refresh_controls() -> void:
 	status.text = connection_detail + (" · Room " + room_code if not room_code.is_empty() else "")
 	status.add_theme_color_override("font_color", Color("c2d6ef") if game_view.visible else Design.MUTED if online else Design.FOREST)
 	create_button.disabled = not online or pending
+	computer_button.disabled = not online or pending
+	friends_button.disabled = pending
 	join_button.disabled = not online or pending
 	var players: Array = game.get("players",[])
+	var computer_match := false
+	for player in players:
+		if player.get("isComputer",false):
+			computer_match = true
 	restart_button.disabled = not online or pending or presenting or players.size() < 2
+	result_home_button.disabled = not online or pending or presenting
 	start_button.visible = not players.is_empty() and players[0].id == self_id
 	start_button.disabled = not online or pending or players.size() < 2
 	# Server deadlines include animation time. Reduced-motion clients must
@@ -1047,6 +1113,8 @@ func refresh_controls() -> void:
 		var active: bool = rank < 0 and not player.is_empty() and player.id == game.get("currentPlayer") and game.get("phase") in ["rolling","moving"]
 		var own: bool = not player.is_empty() and player.id == self_id
 		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own)
+		if computer_match:
+			cards[seat].chat.hide()
 		cards[seat].visible = not player.is_empty()
 		cards[seat].leave_button.disabled = not online or pending or presenting
 		cards[seat].set_lives(int(game.get("timeoutLives",{}).get(player.get("id",""),5)))

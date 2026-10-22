@@ -45,6 +45,10 @@ try {
   await page.goto(`http://127.0.0.1:${previewPort}`);
   await page.waitForFunction(()=>document.querySelector('#rally-name')&&!document.querySelector('#status'),null,{timeout:45000});
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='CONNECTED'));
+  assert(await page.locator('#rally-name').isHidden(),'Dashboard starts without room fields');
+  // The Friends card occupies the left half of the mode row.
+  await page.touchscreen.tap(100,345);
+  await page.locator('#rally-name').waitFor({state:'visible'});
   await page.evaluate(()=>{const update=window.__rallyNativeInputs;window.__rallyNativeInputs=data=>{window.__formData=structuredClone(data);return update(data);};});
   const baseline=await page.locator('#rally-name').boundingBox();
   assert(baseline.height>=44,'Normal name field has a usable touch height');

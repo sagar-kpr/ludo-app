@@ -231,7 +231,8 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.content_margin_top = 6 if compact_height else 8
 	style.content_margin_bottom = 10 if compact_height else 13
 	panel.add_theme_stylebox_override("panel",style)
-	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
+	var computer := bool(player.get("isComputer",false))
+	status_label.text = "CPU" if computer else "You" if own else "" if not player.is_empty() else "Waiting"
 	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))
 	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
 	roll.visible = active and not departed
@@ -239,8 +240,8 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	chat.visible = own and not player.is_empty() and not departed
 	camera_button.visible = chat.visible
 	leave_button.visible = chat.visible
-	gift.visible = not player.is_empty() and not own and not departed
-	gift.disabled = player_id.is_empty() or own
+	gift.visible = not player.is_empty() and not own and not departed and not computer
+	gift.disabled = player_id.is_empty() or own or computer
 	roll.disabled = not can_roll
 	if not player.is_empty():
 		for state in ["normal", "disabled", "hover", "pressed"]:

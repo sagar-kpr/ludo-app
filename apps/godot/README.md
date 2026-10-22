@@ -4,6 +4,36 @@ Active direction: Godot 4.6.1 + GDScript for the Android/web game; Kotlin for
 Android-specific LiveKit integration. The previous Expo client is preserved in
 `apps/mobile`, not deleted or silently redeployed.
 
+## Play vs Computer
+
+The home dashboard shows two illustrated mode cards. **Play with Friends** opens
+a separate screen with the existing player-name, create-room and join-code controls.
+Back navigation preserves entered values. **Play with AI** immediately starts a
+red-versus-yellow match against a server-controlled computer, using the saved
+player name or Guest. Leaving a game returns to the mode dashboard.
+This mode requires an internet connection and the updated game server.
+
+`scripts/mode_card.gd` draws the scalable dice/pawn and robot icons procedurally;
+no bitmap downloads are required. The navy dice-pattern background and gameplay
+layout remain in place. `tests/dashboard.gd` checks navigation and mode-card layout
+at five viewport sizes, including narrow portrait and landscape screens.
+
+The computer uses the shared legal-move engine and the normal server dice. It
+prefers finishing, captures and safe squares, waits for animations, and does not
+consume inactivity dots. Human timeout rules remain unchanged. Friend rooms
+continue to use their existing create/join flow. Computer matches support session
+reconnection, Play again and Back to home; unused computer rooms are removed when
+the human leaves. Chat and gifts are hidden for computer opponents.
+
+`CREATE_COMPUTER_GAME` accepts the same `name` field as `CREATE_ROOM`. Snapshots
+identify the opponent with optional player metadata `isComputer: true`.
+Deploy both the server and web export to enable the option on the hosted site.
+
+Run `npm test` for engine/server coverage, including complete computer matches,
+and `npm run godot:test:computer` for the native client/server flow.
+`npm run godot:test:computer:browser` builds the web client and checks the actual
+mobile start button, computer turns and return home in Chrome.
+
 ## Premium restyle — section 1: board
 
 The board uses one editable Theme: [`resources/theme_tokens.tres`](resources/theme_tokens.tres).

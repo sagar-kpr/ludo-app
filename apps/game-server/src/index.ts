@@ -8,10 +8,12 @@ import { STICKERS } from '../../../packages/shared/src/stickers';
 import { DICE_ROLL_MS } from '../../../packages/shared/src/dice';
 import { persistChat, persistRoom, persistenceEnabled } from './persistence';
 import { turnTimeoutAction } from './turn-clock';
+import { chooseComputerToken } from './computer-player';
 
-type ClientMessage = { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
+type ClientMessage = { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM' | 'CREATE_COMPUTER_GAME'; name: string } | { type: 'JOIN_ROOM'; code: string; name: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
 type Client = { socket: WebSocket; playerId: string; sessionToken: string; roomCode?: string; disconnectTimer?: ReturnType<typeof setTimeout> };
-type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number };
+type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number; computerId?: string; computerActionAt?: number };
+const COMPUTER_THINK_MS = 550;
 const configuredTurnMs = Number(process.env.TURN_TIMEOUT_MS || 30000);
 const turnDurationMs = Number.isFinite(configuredTurnMs) ? Math.max(1000, Math.min(120000, configuredTurnMs)) : 30000;
 const rooms = new Map<string, Room>();
@@ -30,8 +32,10 @@ function syncState(client: Client) {
 }
 function resetClock(room: Room) {
   room.turnDeadline = room.state.phase === 'lobby' || room.state.phase === 'finished' ? 0 : Math.max(Date.now(), room.busyUntil) + turnDurationMs;
+  room.computerActionAt = room.turnDeadline && room.state.currentPlayer === room.computerId ? Math.max(Date.now(), room.busyUntil) + COMPUTER_THINK_MS : undefined;
 }
 function expireRoom(room: Room) {
+  if (room.state.currentPlayer === room.computerId) return false;
   if (!room.turnDeadline || Date.now() < room.turnDeadline || Date.now() < room.busyUntil) return false;
   const action = turnTimeoutAction(room.state, () => randomInt(0, 0x1000000) / 0x1000000);
   if (!action) return false;
@@ -62,20 +66,43 @@ function expireRoom(room: Room) {
   if (!applied) { room.state = previous; return false; }
   return true;
 }
-setInterval(() => { for (const room of rooms.values()) if (room.clients.size) expireRoom(room); },100).unref();
+function playComputerTurn(room: Room) {
+  if (!room.computerActionAt || Date.now() < room.computerActionAt || Date.now() < room.busyUntil || room.state.currentPlayer !== room.computerId) return;
+  room.computerActionAt = undefined;
+  if (room.state.phase === 'rolling') { applyRoll(room); return; }
+  if (room.state.phase !== 'moving') return;
+  const token = chooseComputerToken(room.state);
+  if (token) { applyMove(room, token.id, true, 0); return; }
+  const action = turnTimeoutAction(room.state);
+  if (action?.type === 'pass') { room.state = action.state; resetClock(room); state(room); }
+}
+setInterval(() => {
+  for (const room of rooms.values()) if (room.clients.size) {
+    if (room.computerId && room.state.currentPlayer === room.computerId) playComputerTurn(room);
+    else expireRoom(room);
+  }
+},100).unref();
 const fail = (socket: WebSocket, message: string) => send(socket, { type: 'ERROR', message });
 const stickers = new Set<string>(STICKERS);
 
-function createRoom(client: Client, name: string) {
+function createRoom(client: Client, name: string, computer = false) {
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
   const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors[0], ready: true };
   const room: Room = { code: code(), players: [player], state: createGame([player]), clients: new Map([[client.playerId, client]]), createdAt: Date.now(), busyUntil: 0 };
+  if (computer) {
+    const opponent: Player = { id: id('computer'), name: 'Computer', color: colors[1], ready: true, isComputer: true };
+    room.computerId = opponent.id;
+    room.players.push(opponent);
+    room.state = startGame(createGame(room.players));
+    resetClock(room);
+  }
   client.roomCode = room.code; rooms.set(room.code, room); void persistRoom(room.code, room.players, room.state); send(client.socket, { type: 'ROOM_CREATED', roomCode: room.code, playerId: client.playerId }); state(room);
 }
 function joinRoom(client: Client, value: string, name: string) {
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
   const room = rooms.get(value.toUpperCase());
   if (!room) return fail(client.socket, 'Room not found. Check the invite code.');
+  if (room.computerId) return fail(client.socket, 'This is a computer match. Create or join a friend room instead.');
   if (room.players.length >= 4) return fail(client.socket, 'This room is full.');
   if (room.state.phase !== 'lobby') return fail(client.socket, 'This match has already started.');
   const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors.find(color => !room.players.some(player => player.color === color))!, ready: true };
@@ -144,12 +171,13 @@ function removeRoomPlayer(room: Room, playerId: string, client?: Client, acknowl
     client.roomCode = undefined;
     if (acknowledge) send(client.socket, { type: 'LEFT_ROOM', roomCode: room.code, reason });
   }
-  if (!room.players.length) rooms.delete(room.code);
+  if (!room.players.length || (room.computerId && !room.players.some(player => player.id !== room.computerId))) rooms.delete(room.code);
 }
 function handle(client: Client, message: ClientMessage) {
   if (message.type === 'PING') { send(client.socket, { type: 'PONG', serverTime: Date.now() }); return; }
   if (message.type === 'SYNC_STATE') { syncState(client); return; }
   if (message.type === 'CREATE_ROOM') return createRoom(client, message.name);
+  if (message.type === 'CREATE_COMPUTER_GAME') return createRoom(client, message.name, true);
   if (message.type === 'JOIN_ROOM') return joinRoom(client, message.code, message.name);
   if (!client.roomCode) return fail(client.socket, 'Join a room first.');
   const room = rooms.get(client.roomCode); if (!room) return fail(client.socket, 'Room expired.');
@@ -183,6 +211,7 @@ function handle(client: Client, message: ClientMessage) {
     if (!applyMove(room, message.tokenId)) fail(client.socket, 'That token cannot move.');
     return;
   }
+  if (room.computerId && (message.type === 'CHAT' || message.type === 'SEND_STICKER')) return fail(client.socket, 'Chat and reactions are available in friend rooms.');
   if (message.type === 'CHAT') { const text = message.text.trim().slice(0, 240); if (text) { void persistChat(room.code, client.playerId, text); publish(room, { type: 'CHAT', playerId: client.playerId, name: room.players.find((p) => p.id === client.playerId)?.name, text, at: Date.now() }); } }
   if (message.type === 'SEND_STICKER') {
     const target = room.players.find((player) => player.id === message.targetPlayerId);

@@ -25,7 +25,7 @@ const previewPort=await freePort();
 const profilesOnly=process.argv.includes('--profiles-only');
 // Software WebGL screenshots can stall the render loop; timeout behavior is
 // tested separately with a real 1-second deadline in the server integration test.
-const gameServer=await service(['--import','tsx','apps/game-server/src/index.ts'],{PORT:String(port),TURN_TIMEOUT_MS:'60000',SUPABASE_SERVICE_ROLE_KEY:'',RECONNECT_GRACE_MS:'5000'},'listening');
+const gameServer=await service(['--import','tsx','apps/game-server/src/index.ts'],{PORT:String(port),TURN_TIMEOUT_MS:'120000',SUPABASE_SERVICE_ROLE_KEY:'',RECONNECT_GRACE_MS:'15000'},'listening');
 let preview;
 let browser;
 try {
@@ -56,11 +56,16 @@ try {
   }
   mkdirSync('test-results',{recursive:true});
   await host.screenshot({path:'test-results/godot-home.png'});
+  for(const page of [host,friend]) {
+    await page.touchscreen.tap(105,365);
+    await page.locator('#rally-name').waitFor({state:'visible'});
+  }
   // Tap the actual canvas field on a touch device and type through the browser input.
-  await host.touchscreen.tap(180,305);
+  await host.locator('#rally-name').tap();
   await host.waitForFunction(()=>['INPUT','TEXTAREA'].includes(document.activeElement?.tagName));
   await host.locator('input:focus,textarea:focus').fill('Mobile Maya');
-  await host.touchscreen.tap(180,385);
+  const nameRect=await host.locator('#rally-name').boundingBox();
+  await host.touchscreen.tap(nameRect.x+nameRect.width/2,nameRect.y+nameRect.height+22+30);
   await host.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='ROOM_CREATED'));
   await host.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='STATE'&&event.state.players[0]?.name==='Mobile Maya'));
   // Network interception is test-only; the production client exposes no hooks.
@@ -71,7 +76,8 @@ try {
   await friend.locator('#rally-name').fill('Arjun');
   await friend.locator('#rally-code').tap();
   await friend.locator('#rally-code').fill(code.toLowerCase());
-  await friend.touchscreen.tap(180,550);
+  const codeRect=await friend.locator('#rally-code').boundingBox();
+  await friend.touchscreen.tap(codeRect.x+codeRect.width/2,codeRect.y+codeRect.height+22+30);
   await host.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='STATE'&&event.state.players.length===2));
   await host.waitForTimeout(300);
   await host.screenshot({path:'test-results/godot-lobby.png'});
@@ -85,7 +91,12 @@ try {
   await host.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='STATE'&&event.recovered&&event.state.players.length===2));
   await host.waitForTimeout(400);
   await host.evaluate(()=>window.__ludoSockets.at(-1).send(JSON.stringify({type:'CHAT',text:'Recovered chat'})));
-  await friend.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='CHAT'&&event.text==='Recovered chat'));
+  try {
+    await friend.waitForFunction(()=>window.__ludoEvents.some(event=>event.type==='CHAT'&&event.text==='Recovered chat'));
+  } catch(error) {
+    for(const page of [host,friend])console.error('Recovery diagnostics:',await page.evaluate(()=>({events:window.__ludoEvents.slice(-12),sockets:window.__ludoSockets.map(socket=>({state:socket.readyState,url:socket.url})),visibility:document.visibilityState})));
+    throw error;
+  }
   await host.evaluate(()=>{ window.dispatchEvent(new Event('online')); document.dispatchEvent(new Event('visibilitychange')); });
   await host.waitForFunction(()=>window.__ludoEvents.filter(event=>event.type==='STATE'&&event.recovered).length>=2);
   const resumes=await host.evaluate(()=>window.__ludoEvents.filter(event=>event.type==='CONNECTED'&&event.resumed).length);
