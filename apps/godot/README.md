@@ -17,6 +17,11 @@ This mode requires an internet connection and the updated game server.
 no bitmap downloads are required. The navy dice-pattern background and gameplay
 layout remain in place. `tests/dashboard.gd` checks navigation and mode-card layout
 at five viewport sizes, including narrow portrait and landscape screens.
+Mode cards and the dice use short press/release tweens; friend-screen navigation
+fades in, including the web's native input overlay. Reduce motion disables these
+effects. Dice use a closer camera and larger available card slots, preserving
+avatar spacing. Pawn landing taps retain their timing and soft tone with a 6 dB
+volume increase; captures and dice generation are unchanged.
 
 The computer uses the shared legal-move engine and the normal server dice. It
 prefers finishing, captures and safe squares, waits for animations, and does not

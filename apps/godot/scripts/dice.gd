@@ -161,7 +161,7 @@ func add_mesh(mesh: Mesh, position_at: Vector3, material: Material, parent: Node
 func show_face(value: int) -> void:
 	if die and FACE_ROTATIONS.has(value):
 		settled_value = value
-		camera.size = 1.60
+		camera.size = 1.44
 		die.rotation = FACE_ROTATIONS[value]
 		die.position = Vector3.ZERO
 		die.scale = Vector3.ONE

@@ -27,6 +27,7 @@ var home_card: VBoxContainer
 var dashboard: VBoxContainer
 var friends_setup: VBoxContainer
 var friends_button: Button
+var setup_transition: Tween
 var lobby: VBoxContainer
 var game_view: VBoxContainer
 var status: Label
@@ -109,7 +110,7 @@ func sync_web_form() -> void:
 		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
 	var scroll := content.get_node("SetupScroll") as ScrollContainer
 	var clip := scroll.get_global_rect()
-	var data := {"fields":fields,"visible":friends_setup.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
+	var data := {"fields":fields,"visible":friends_setup.is_visible_in_tree(),"opacity":friends_setup.modulate.a,"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
 	var values: Variant = JSON.parse_string(str(JavaScriptBridge.eval("window.__rallyNativeInputs("+JSON.stringify(data)+")",true)))
 	if values is Dictionary:
 		# Keep text and controls at their normal width when a keyboard shortens
@@ -168,6 +169,7 @@ func _ready() -> void:
 	board.step_landed.connect(func(id: String): feedback.cue("step",id.begins_with(self_id+"-")))
 	board.token_captured.connect(func(mover: String, captured: String): feedback.cue("capture",mover.begins_with(self_id+"-") or captured.begins_with(self_id+"-")))
 	for card in cards:
+		card.dice.reduced_motion = reduced_motion
 		card.gift_pressed.connect(open_sticker_picker)
 		card.chat_pressed.connect(open_table_chat)
 		card.leave_pressed.connect(open_leave_confirmation)
@@ -400,12 +402,14 @@ func build_ui() -> void:
 	dashboard.add_child(modes)
 	friends_button = ModeCard.new()
 	friends_button.name = "FriendsMode"
+	friends_button.reduced_motion = reduced_motion
 	friends_button.tooltip_text = "Play with Friends · Create or join a private online room"
 	friends_button.pressed.connect(func(): show_friends_setup(true))
 	modes.add_child(friends_button)
 	computer_button = ModeCard.new()
 	computer_button.name = "ComputerMode"
 	computer_button.computer = true
+	computer_button.reduced_motion = reduced_motion
 	computer_button.tooltip_text = "Play with AI · One-on-one against the computer. Internet connection required."
 	computer_button.pressed.connect(func(): request_room(false,true))
 	modes.add_child(computer_button)
@@ -586,6 +590,15 @@ func build_dialogs() -> void:
 	motion.toggled.connect(func(value: bool):
 		reduced_motion = value
 		board.reduced_motion = value
+		for mode in [friends_button,computer_button]:
+			mode.reduced_motion = value
+			if value:
+				mode.reset_touch()
+		if value:
+			if setup_transition and setup_transition.is_valid():
+				setup_transition.kill()
+			dashboard.modulate = Color.WHITE
+			friends_setup.modulate = Color.WHITE
 		for pawn in board.pawns.values():
 			pawn.reduced_motion = value
 		for card in cards:
@@ -850,8 +863,17 @@ func show_sticker(event: Dictionary) -> void:
 
 func show_friends_setup(show_friends: bool) -> void:
 	sync_web_form()
+	if setup_transition and setup_transition.is_valid():
+		setup_transition.kill()
+	dashboard.modulate = Color.WHITE
+	friends_setup.modulate = Color.WHITE
 	dashboard.visible = not show_friends
 	friends_setup.visible = show_friends
+	if not reduced_motion:
+		var target := friends_setup if show_friends else dashboard
+		target.modulate.a = 0.25
+		setup_transition = create_tween()
+		setup_transition.tween_property(target,"modulate:a",1.0,0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	notice.text = ""
 	content.get_node("SetupScroll").scroll_vertical = 0
 	sync_web_form.call_deferred()

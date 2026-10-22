@@ -2,6 +2,8 @@ extends Button
 
 const Design = preload("res://scripts/design.gd")
 var computer := false
+var reduced_motion := false
+var touch_tween: Tween
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(0,252)
@@ -37,6 +39,30 @@ func _ready() -> void:
 		caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		column.add_child(caption)
 	resized.connect(queue_redraw)
+	resized.connect(func(): pivot_offset = size*0.5)
+	button_down.connect(func(): animate_touch(true))
+	button_up.connect(func(): animate_touch(false))
+	visibility_changed.connect(func():
+		if not is_visible_in_tree():
+			reset_touch()
+	)
+
+func reset_touch() -> void:
+	if touch_tween and touch_tween.is_valid():
+		touch_tween.kill()
+	scale = Vector2.ONE
+
+func animate_touch(pressed: bool) -> void:
+	if touch_tween and touch_tween.is_valid():
+		touch_tween.kill()
+	if reduced_motion:
+		scale = Vector2.ONE
+		return
+	touch_tween = create_tween()
+	if pressed:
+		touch_tween.tween_property(self,"scale",Vector2.ONE*0.965,0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	else:
+		touch_tween.tween_property(self,"scale",Vector2.ONE,0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func rounded(rect: Rect2, color: Color, radius: int, outline: Color = Color.TRANSPARENT) -> void:
 	var style := StyleBoxFlat.new()

@@ -86,6 +86,7 @@
 
   window.__rallyNativeInputs = data => {
     latest = data;
+    layer.style.opacity = String(data.opacity ?? 1);
     fitViewport();
     const values = {};
     for (const field of data.fields) {

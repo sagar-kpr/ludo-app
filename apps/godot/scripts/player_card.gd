@@ -46,7 +46,7 @@ func animate_dice_touch(pressed: bool) -> void:
 		roll.scale = Vector2.ONE
 		return
 	touch_tween = create_tween()
-	touch_tween.tween_property(roll,"scale",Vector2.ONE*0.95 if pressed else Vector2.ONE,0.09 if pressed else 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	touch_tween.tween_property(roll,"scale",Vector2.ONE*0.94 if pressed else Vector2.ONE,0.08 if pressed else 0.20).set_trans(Tween.TRANS_SINE if pressed else Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func set_clock(deadline: int, duration: int, active: bool, own: bool) -> void:
 	turn_deadline_ticks = deadline
@@ -197,7 +197,7 @@ func fit_width(available_width: float, viewport_height: float = 860.0, mobile_po
 	custom_minimum_size.x = minf(152.0 if compact_portrait else 156.0 if compact_height else 180.0,available_width)
 	var compact := available_width < 164.0
 	var portrait_size := 52.0 if compact_portrait else 50.0 if viewport_height < 450.0 else 56.0 if compact_height else 64.0 if compact else 72.0
-	var dice_size := minf(portrait_size-2.0,52.0 if compact or compact_height else 60.0)
+	var dice_size := minf(portrait_size-1.0,54.0 if compact or compact_height else 68.0)
 	name_label.add_theme_font_size_override("font_size",13 if compact_portrait else 14)
 	set_rank(finish_rank)
 	avatar.custom_minimum_size = Vector2.ONE*portrait_size
