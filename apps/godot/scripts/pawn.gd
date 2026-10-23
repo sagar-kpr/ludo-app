@@ -1,6 +1,7 @@
 extends Node3D
 
 signal glide_passed(point_index: int)
+signal hop_ended
 
 const Design = preload("res://scripts/design.gd")
 const Geometry = preload("res://scripts/geometry.gd")
@@ -13,6 +14,8 @@ var resting := Vector3.ZERO
 var visual: Node3D
 var base_visual: Node3D
 var moving := false
+var hop_tween: Tween
+var hop_generation := 0
 var sliding := false
 var selection_enabled := true
 var glow_floor: MeshInstance3D
@@ -92,7 +95,7 @@ func configure(id: String, color: Color) -> void:
 	shadow_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	shadow_material.render_priority = 2
 	shadow_material.albedo_texture = Design.pawn_shadow_texture()
-	shadow_material.albedo_color = Color(color, Design.TOKENS.pawn_shadow_opacity)
+	shadow_material.albedo_color = Color(0.015,0.025,0.05,0.12)
 	cell_shadow = part(shadow_mesh,Vector3(0,0.005,0),shadow_material)
 	cell_shadow.name = "CellShadow"
 	cell_shadow.rotation.x = -PI/2
@@ -255,7 +258,7 @@ func _process(delta: float) -> void:
 		ring.visible = selected
 		if ring.visible and not reduced_motion:
 			ring.rotation.y = fposmod(ring.rotation.y + delta*2.4,TAU)
-		glow_floor.visible = selected
+		glow_floor.hide()
 	if visual and not moving:
 		var loop := (1.0-cos(Time.get_ticks_msec()*TAU/1000.0))*0.5 if selected and not reduced_motion else 0.0
 		# The tilted board camera projects this to roughly four logical pixels.
@@ -276,6 +279,8 @@ func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 		place_shadow()
 		return
 	var from := position
+	hop_generation += 1
+	var generation := hop_generation
 	resting = global_position
 	moving = true
 	ring.hide()
@@ -283,6 +288,7 @@ func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 	place_shadow()
 	visual.position = Vector3.ZERO
 	var tween := create_tween()
+	hop_tween = tween
 	tween.tween_method(func(progress: float):
 		var travel := clampf((progress-0.10)/0.76,0.0,1.0)
 		var eased := travel*travel*(3.0-2.0*travel)
@@ -295,12 +301,26 @@ func hop_to(destination: Vector3, seconds: float, reduced_motion: bool) -> void:
 		var landing := sin(clampf((progress-0.86)/0.14,0.0,1.0)*PI)*0.033
 		visual.scale = Vector3(1.0-0.0165*spring+takeoff+landing,1.0+0.036*spring-takeoff-landing,1.0-0.0165*spring+takeoff+landing)
 	, 0.0, 1.0, maxf(seconds,0.08))
-	await tween.finished
+	tween.finished.connect(func(): hop_ended.emit(),CONNECT_ONE_SHOT)
+	await hop_ended
+	if generation != hop_generation:
+		return
 	position = destination
 	visual.position = Vector3.ZERO
 	visual.scale = Vector3.ONE
 	moving = false
 	place_shadow()
+
+func cancel_hop(at: Vector3) -> void:
+	hop_generation += 1
+	if hop_tween and hop_tween.is_valid():
+		hop_tween.kill()
+	position = at
+	visual.position = Vector3.ZERO
+	visual.scale = Vector3.ONE
+	moving = false
+	place_shadow()
+	hop_ended.emit()
 
 func glide_path(points: Array[Vector3], durations: Array[float], instant: bool) -> void:
 	if points.is_empty():
@@ -348,5 +368,5 @@ func vanish() -> void:
 					mesh.material_override.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 					mesh.material_override.albedo_color.a = 1.0-amount
 		visual.position.y = amount*0.3
-		cell_shadow.material_override.albedo_color.a = (1.0-amount)*Design.TOKENS.pawn_shadow_opacity
+		cell_shadow.material_override.albedo_color.a = (1.0-amount)*0.12
 	,0.0,1.0,0.85)

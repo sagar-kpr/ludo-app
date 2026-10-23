@@ -41,10 +41,6 @@ func _ready() -> void:
 	portrait.material = AvatarCatalog.rounded_material()
 	add_child(portrait)
 	portrait.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	portrait.offset_left = 3
-	portrait.offset_top = 3
-	portrait.offset_right = -3
-	portrait.offset_bottom = -3
 	portrait.hide()
 
 func configure(color: Color, seed_value: int, joined: bool) -> void:
@@ -54,14 +50,6 @@ func configure(color: Color, seed_value: int, joined: bool) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	var background := StyleBoxFlat.new()
-	background.bg_color = Color("162c46").lerp(accent,0.20)
-	background.set_corner_radius_all(12)
-	background.set_border_width_all(0)
-	background.shadow_color = Color(0,0,0,0.25)
-	background.shadow_size = 3
-	background.shadow_offset = Vector2(0,2)
-	draw_style_box(background,Rect2(Vector2.ZERO,size))
 	if portrait != null and portrait.texture != null:
 		return
 	var scale_factor := minf(size.x,size.y)/48.0

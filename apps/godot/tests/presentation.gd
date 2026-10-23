@@ -81,6 +81,48 @@ func run() -> void:
 	check(actor_steps == observer_steps, "Both screens visit the same per-cell positions")
 	check(actor.game == observer.game and actor.game.version == 3, "Presentation fix preserves authoritative state")
 	check(not actor.presenting and not actor.awaiting_move_state, "Resync releases the presentation lock after applying state")
+	# A legal local tap starts one visual hop without waiting for a round trip.
+	var selectable := fixture(4,1)
+	selectable.phase = "moving"
+	selectable.dice = 3
+	for client in clients:
+		client._receive(state_event(selectable))
+	actor_steps.clear()
+	observer_steps.clear()
+	actor.board.begin_move_preview("a-0",3)
+	check(actor.board.pawns["a-0"].moving and not actor.board.move_preview.is_empty(),"A legal pawn starts its first hop immediately on tap")
+	check(actor.game.version == 4 and actor.board.tokens["a-0"].position == 1,"Immediate visual feedback never changes authoritative state")
+	for client in clients:
+		client._receive({"type":"TOKEN_MOVED","tokenId":"a-0","from":1,"to":4,"durationMs":720,"captured":[],"version":5})
+		client._receive(state_event(fixture(5,4)))
+	await wait_idle(clients)
+	check(actor_steps.size() == 3 and actor_steps == observer_steps,"Confirmation continues the first hop without replaying it or changing movement speed")
+	check(actor.board.move_preview.is_empty() and actor.game == observer.game,"Preview clears after the authoritative move and snapshot")
+	selectable.version = 6
+	actor._receive(state_event(selectable))
+	actor_steps.clear()
+	actor.board.begin_move_preview("a-0",3)
+	await create_timer(0.32).timeout
+	check(actor.board.move_preview.done and actor.board.tokens["a-0"].position == 1,"A slow reply holds the first visual landing without committing game state")
+	actor._receive({"type":"TOKEN_MOVED","tokenId":"a-0","from":1,"to":4,"durationMs":720,"captured":[],"version":7})
+	actor._receive(state_event(fixture(7,4)))
+	await wait_idle([actor])
+	check(actor_steps.size() == 3 and actor.board.display_positions["a-0"] == 4,"A late confirmation continues the remaining hops without replay or teleport")
+	# Use a newer version for the rollback fixture.
+	selectable.version = 8
+	actor._receive(state_event(selectable))
+	var origin: Vector3 = actor.board.pawns["a-0"].position
+	actor.board.begin_move_preview("a-0",3)
+	actor._receive({"type":"ERROR","message":"Timer expired; the server acted automatically."})
+	check(actor.board.move_preview.is_empty() and not actor.board.pawns["a-0"].moving and actor.board.pawns["a-0"].position.is_equal_approx(origin),"A rejected move cancels the first hop and restores the original spot")
+	await process_frame
+	check(actor.board.pawns["a-0"].position.is_equal_approx(origin),"Cancelled hop cannot move the pawn again on a later frame")
+	actor.board.begin_move_preview("a-0",3)
+	actor.network.connection_changed.emit(false,"Reconnecting…")
+	check(actor.board.move_preview.is_empty() and actor.board.pawns["a-0"].position.is_equal_approx(origin) and actor.reconnect_overlay.visible,"Disconnect cancels unconfirmed movement and shows reconnect progress")
+	actor.network.connection_changed.emit(true,"Connected")
+	actor._receive(state_event(selectable,true))
+	await wait_idle([actor])
 	# Genuine missing move: actor gets only a recovery snapshot; observer gets
 	# the normal move broadcast. Their visible paths must still match.
 	for client in clients:

@@ -215,7 +215,7 @@ func _ready() -> void:
 				reconnect_title.text = "Checking connection" if detail == "Checking connection…" else "Connection lost"
 				for dialog in [menu,chat_dialog,leave_dialog,sticker_picker]:
 					dialog.hide()
-			cancel_dice_previews()
+			cancel_input_previews()
 			pending = false
 			room_loading = false
 			loading_overlay.hide()
@@ -1019,7 +1019,7 @@ func open_leave_confirmation() -> void:
 func return_home() -> void:
 	recovering_match = false
 	reconnect_overlay.hide()
-	cancel_dice_previews()
+	cancel_input_previews()
 	room_loading = false
 	loading_overlay.hide()
 	room_code = ""
@@ -1198,6 +1198,8 @@ func send(intent: Dictionary) -> void:
 		notice.text = "Cannot reach the game server."
 		return
 	pending = true
+	if intent.get("type","") == "MOVE_TOKEN":
+		board.begin_move_preview(str(intent.get("tokenId","")),int(game.get("dice",0)))
 	if intent.get("type","") == "ROLL_DICE":
 		for card in cards:
 			if card.player_id == self_id:
@@ -1208,7 +1210,8 @@ func send(intent: Dictionary) -> void:
 		loading_overlay.show()
 	refresh_controls()
 
-func cancel_dice_previews() -> void:
+func cancel_input_previews() -> void:
+	board.cancel_move_preview()
 	for card in cards:
 		card.dice.cancel_roll_preview()
 
@@ -1261,7 +1264,7 @@ func present_event(event: Dictionary) -> void:
 			if event.get("reason","") == "inactivity":
 				notice.text = "Timer expired with no chances left. You left the game."
 		"ERROR":
-			cancel_dice_previews()
+			cancel_input_previews()
 			pending = false
 			room_loading = false
 			loading_overlay.hide()
@@ -1273,7 +1276,7 @@ func present_event(event: Dictionary) -> void:
 			home.hide()
 			lobby.show()
 		"STATE":
-			cancel_dice_previews()
+			cancel_input_previews()
 			room_code = str(event.get("roomCode",room_code))
 			room_label.text = room_code
 			var snapshot: Dictionary = event.state
@@ -1308,7 +1311,7 @@ func present_event(event: Dictionary) -> void:
 				awaiting_move_state = false
 				presenting = false
 		"TURN_SKIPPED":
-			cancel_dice_previews()
+			cancel_input_previews()
 			if int(event.get("version",-1)) <= latest_version:
 				return
 			pending = false

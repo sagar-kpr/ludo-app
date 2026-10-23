@@ -171,7 +171,7 @@ func run() -> void:
 		check(pin.ring.visible and pin.visual.scale == Vector3.ONE and pin.visual.position.y == 0, "Reduced motion retains legal ring without bounce or scaling")
 		pin.reduced_motion = active.reduced_motion
 		check(pin.ring.mesh is TorusMesh and pin.ring.material_override.metallic > 0.7, "Selectable feet have a solid metallic ring")
-		check(pin.glow_floor.material_override.get_shader_parameter("tint") == pin.token_color, "Selectable aura matches token color")
+		check(not pin.glow_floor.visible,"Selectable pawn keeps its ring without a colored floor glow")
 		for height in [0.05,0.75,1.40]:
 			var point: Vector2 = active.board.display_point(active.board.camera.unproject_position(pin.visual.to_global(Vector3(0,height,0.22))))
 			check(active.board.token_at_screen(point) == token_id, "Head, center and feet select the complete visible token")

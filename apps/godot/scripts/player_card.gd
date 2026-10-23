@@ -244,7 +244,7 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.content_margin_bottom = 6 if compact_height else 8
 	panel.add_theme_stylebox_override("panel",style)
 	var computer := bool(player.get("isComputer",false))
-	status_label.text = "Bot" if computer else "You" if own else "" if not player.is_empty() else "Waiting"
+	status_label.text = "You" if own else "" if not player.is_empty() else "Waiting"
 	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))
 	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
 	roll.visible = active and not departed

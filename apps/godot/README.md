@@ -64,17 +64,18 @@ Theme's `Board` styleboxes, edit `frame`/`rim` for exterior radii/borders/shadow
 `yard_floor` for white-yard radii/shadows and `yard_inset` for inset shading.
 Style dimensions are in artwork pixels (64 pixels per board cell).
 Restart the scene after editing; artwork and the shared palette are cached.
-Pawn step shadows use the same player palette. Each departure/landing leaves a
+Pawn step shadows use the same player palette. Departures and intermediate landings leave a
 soft colored mark that holds for 0.35 seconds and fades over 1.10 seconds.
 Tune `step_shadow_opacity`, `step_shadow_hold` and `step_shadow_fade` in the same
 Theme resource. Sixteen reusable marks share one 128×128 radial texture;
 reduced motion suppresses trails. Movement timing and coordinates are unchanged.
-Every standing pawn also keeps a permanent colored shadow until its next hop.
-The permanent stamp stays on the departure cell during a hop and transfers on
-landing. It shares the trail texture, draws above the board, and uses the Theme's
-`pawn_shadow_opacity` setting. Shared cells fan each color's pawn/shadow anchors
-slightly apart so individual marks remain visible; reduced motion keeps these
-stationary shadows.
+The final landing gets no colored mark or selection aura: only the existing
+metal rings and a faint neutral contact shadow remain under the pawn.
+Player portraits have no surrounding frame/background, and Bot appears once
+in its profile heading, leaving the other slot for its turn timer.
+Manual legal pawn taps start the first visual hop immediately at the normal
+240 ms pace. The server confirms the rest of the move; rejected requests and
+connection losses cancel the preview and restore its original position.
 
 Client presentation now queues focus/reconnection snapshots behind pending dice
 and pawn animations. A recovery snapshot cannot discard `TOKEN_MOVED` while the

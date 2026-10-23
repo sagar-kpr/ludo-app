@@ -46,7 +46,7 @@ func run() -> void:
 	for pawn in board.pawns.values():
 		pawn.place_shadow()
 		check(pawn.cell_shadow.visible and pawn.cell_shadow.material_override is StandardMaterial3D, "Every pawn has a permanent portable shadow")
-		check(Color(pawn.cell_shadow.material_override.albedo_color, 1) == pawn.token_color, "Stationary shadow matches its pawn color")
+		check(pawn.cell_shadow.material_override.albedo_color == Color(0.015,0.025,0.05,0.12), "Stationary feet have a subtle neutral shadow without a player-colored patch")
 		check(pawn.cell_shadow.material_override.albedo_texture == board.trail_texture, "Permanent and fading shadows reuse the same texture")
 		check(pawn.cell_shadow.material_override.render_priority > board.board_plane.material_override.render_priority, "Board cannot cover stationary shadows")
 	var shadow_pawn = board.pawns["coral-0"]
@@ -54,6 +54,7 @@ func run() -> void:
 	shadow_pawn.reduced_motion = false
 	shadow_pawn._process(0)
 	check(shadow_pawn.ring.visible, "Legal pawn displays its feet ring during selection")
+	check(not shadow_pawn.glow_floor.visible,"Selection keeps the metal ring without a colored floor glow")
 	check(shadow_pawn.ring.mesh is TorusMesh and shadow_pawn.ring.material_override.metallic > 0.7, "Selection uses a solid metal hoop instead of a flat glow")
 	var ring_angle: float = shadow_pawn.ring.rotation.y
 	shadow_pawn._process(0.25)
@@ -124,7 +125,7 @@ func run() -> void:
 	await board.animate_move({"tokenId": "coral-0", "from": 1, "to": 4, "durationMs": 720})
 	check(cache_draws[0] == draws_before_move,"Multi-frame movement and shadows do not redraw the static artwork")
 	check(steps.size() == 3, "Move presentation still lands once per step")
-	check(board.trails.size() == 4, "Move leaves marks at departure and every landing")
+	check(board.trails.size() == 3, "Move leaves path marks without coloring the final occupied step")
 	for index in range(board.trails.size()):
 		var expected := BoardMath.world("coral", index + 1, 0)
 		var at := board.trails[index].position
@@ -135,7 +136,7 @@ func run() -> void:
 	check(board.trails.size() == board.TRAIL_POOL_SIZE, "Long trails reuse the bounded effect pool")
 	await create_timer(Tokens.step_shadow_hold + Tokens.step_shadow_fade + 0.10).timeout
 	check(board.trails.is_empty() and board.trail_fades.is_empty(), "Shadow marks finish fading and return to the pool")
-	check(board.pawns["coral-0"].cell_shadow.visible and board.pawns["coral-0"].cell_shadow.material_override.albedo_color.a > 0.6, "Destination shadow remains after old step marks fade")
+	check(board.pawns["coral-0"].cell_shadow.visible and board.pawns["coral-0"].cell_shadow.material_override.albedo_color.a <= 0.12, "Destination retains only a faint neutral contact shadow")
 	check(board.trail_pool.all(func(mark): return is_instance_valid(mark) and not mark.visible), "Pool nodes remain reusable after fading")
 	board.reduced_motion = true
 	board.leave_trail(Vector3.ZERO, Tokens.red)

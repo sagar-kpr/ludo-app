@@ -4,6 +4,7 @@ signal token_pressed(token_id: String)
 signal step_landed(token_id: String)
 signal capture_passed(token_id: String)
 signal token_captured(mover_id: String, captured_id: String)
+signal move_preview_finished
 const Design = preload("res://scripts/design.gd")
 const BoardMath = preload("res://scripts/board_math.gd")
 const Pawn = preload("res://scripts/pawn.gd")
@@ -16,6 +17,7 @@ var camera: Camera3D
 var pawns: Dictionary = {}
 var tokens: Dictionary = {}
 var display_positions: Dictionary = {}
+var move_preview: Dictionary = {}
 var enabled := false
 var reduced_motion := false
 var artwork_viewport: SubViewport
@@ -404,6 +406,35 @@ func highlight_player(color: String, dice_value: int) -> void:
 	for id in pawns:
 		pawns[id].highlight = tokens[id].color == color and BoardMath.legal(tokens[id],dice_value,tokens.values())
 
+func begin_move_preview(id: String, dice_value: int) -> void:
+	if reduced_motion or not move_preview.is_empty() or not pawns.has(id) or not pawns[id].legal_move:
+		return
+	var token: Dictionary = tokens[id]
+	if not BoardMath.legal(token,dice_value,tokens.values()):
+		return
+	var start := int(token.position)
+	var landing := 1 if start == 0 else start+1
+	var finish := 1 if start == 0 else start+dice_value
+	var index := int(id.get_slice("-",id.get_slice_count("-")-1))
+	var preview := {"id":id,"from":start,"to":finish,"landing":landing,"origin":pawns[id].position,"done":false,"cancelled":false,"confirmed":false}
+	move_preview = preview
+	layout_stacks(id)
+	pawns[id].scale = Vector3.ONE
+	# Start only the first visual hop. Game state remains server-authoritative.
+	await pawns[id].hop_to(world_position(str(token.color),landing,index),0.24,false)
+	preview.done = true
+	move_preview_finished.emit()
+
+func cancel_move_preview() -> void:
+	if move_preview.is_empty() or move_preview.confirmed:
+		return
+	var preview := move_preview
+	move_preview = {}
+	preview.cancelled = true
+	if pawns.has(preview.id):
+		pawns[preview.id].cancel_hop(preview.origin)
+		layout_stacks()
+
 func animate_move(event: Dictionary) -> void:
 	var id := str(event.get("tokenId", ""))
 	if not pawns.has(id):
@@ -416,14 +447,29 @@ func animate_move(event: Dictionary) -> void:
 		return
 	var steps := 1 if start == 0 else maxi(0, mini(finish, BoardMath.HOME) - mini(start, BoardMath.HOME))
 	var duration := float(event.get("durationMs", steps*240)) / 1000.0
+	var consumed := 0
+	if not move_preview.is_empty():
+		var preview := move_preview
+		if preview.id == id and preview.from == start and preview.to == finish:
+			preview.confirmed = true
+			if not preview.done:
+				await move_preview_finished
+			move_preview = {}
+			consumed = 1
+			display_positions[id] = int(preview.landing)
+			step_landed.emit(id)
+		else:
+			cancel_move_preview()
 	layout_stacks(id)
 	pawns[id].scale = Vector3.ONE
-	leave_trail(pawns[id].position,BOARD_COLORS[token.color])
-	for step in range(steps):
+	if consumed == 0:
+		leave_trail(pawns[id].position,BOARD_COLORS[token.color])
+	for step in range(consumed,steps):
 		var landing := finish if start == 0 else start + step + 1
 		var destination := world_position(str(token.color), landing, index)
 		await pawns[id].hop_to(destination, maxf(0.24,duration / maxf(steps, 1)), reduced_motion)
-		leave_trail(destination,BOARD_COLORS[token.color])
+		if step < steps-1:
+			leave_trail(destination,BOARD_COLORS[token.color])
 		display_positions[id] = landing
 		step_landed.emit(id)
 	display_positions[id] = finish
