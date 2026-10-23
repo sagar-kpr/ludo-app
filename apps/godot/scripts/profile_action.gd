@@ -3,6 +3,11 @@ extends Button
 # Code-drawn icons remain crisp and don't depend on emoji-font support on web.
 const Design = preload("res://scripts/design.gd")
 var kind := "chat"
+var active := false:
+	set(value):
+		if active == value: return
+		active = value
+		queue_redraw()
 var unread := false:
 	set(value):
 		unread = value
@@ -37,6 +42,8 @@ func _draw() -> void:
 		"chat":
 			draw_polyline(PackedVector2Array([Vector2(-6,-5),Vector2(6,-5),Vector2(6,3),Vector2(-2,3),Vector2(-6,6),Vector2(-6,-5)]),ink,1.5,true)
 		"camera":
+			if active:
+				ink = Color("75eabd")
 			draw_rect(Rect2(-7,-4,9,8),ink,false,1.5)
 			draw_polyline(PackedVector2Array([Vector2(2,-2),Vector2(7,-4),Vector2(7,4),Vector2(2,2)]),ink,1.5,true)
 		"leave":

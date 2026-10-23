@@ -20,6 +20,10 @@ coverage/
 .tools/
 **/.godot/
 **/.gradle/
+**/.kotlin/
 **/build/
 **/local.properties
 **/export_credentials.cfg
+
+/apps/godot/addons/rally_media/bin/
+/apps/godot/android/

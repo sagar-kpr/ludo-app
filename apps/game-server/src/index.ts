@@ -9,10 +9,11 @@ import { DICE_ROLL_MS } from '../../../packages/shared/src/dice';
 import { persistChat, persistRoom, persistenceEnabled } from './persistence';
 import { turnTimeoutAction } from './turn-clock';
 import { chooseComputerToken } from './computer-player';
+import { createMediaToken, removeMediaParticipant } from './media';
 
-type ClientMessage = { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM' | 'CREATE_COMPUTER_GAME'; name: string; avatarId?: string } | { type: 'JOIN_ROOM'; code: string; name: string; avatarId?: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
-type Client = { socket: WebSocket; playerId: string; sessionToken: string; roomCode?: string; disconnectTimer?: ReturnType<typeof setTimeout> };
-type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number; computerId?: string; computerActionAt?: number };
+type ClientMessage = { type: 'MEDIA_JOIN' } | { type: 'LEAVE_GAME' } | { type: 'PING' } | { type: 'SYNC_STATE' } | { type: 'CREATE_ROOM' | 'CREATE_COMPUTER_GAME'; name: string; avatarId?: string } | { type: 'JOIN_ROOM'; code: string; name: string; avatarId?: string } | { type: 'START_GAME' } | { type: 'RESTART_GAME' } | { type: 'ROLL_DICE' } | { type: 'MOVE_TOKEN'; tokenId: string } | { type: 'CHAT'; text: string } | { type: 'SEND_STICKER'; targetPlayerId: string; sticker: string };
+type Client = { socket: WebSocket; playerId: string; sessionToken: string; roomCode?: string; disconnectTimer?: ReturnType<typeof setTimeout>; mediaRequestedAt?: number };
+type Room = { code: string; players: Player[]; state: GameState; clients: Map<string, Client>; createdAt: number; busyUntil: number; turnDeadline?: number; computerId?: string; computerActionAt?: number; mediaPlayers: Set<string> };
 const COMPUTER_THINK_MS = 550;
 const configuredTurnMs = Number(process.env.TURN_TIMEOUT_MS || 30000);
 const turnDurationMs = Number.isFinite(configuredTurnMs) ? Math.max(1000, Math.min(120000, configuredTurnMs)) : 30000;
@@ -26,7 +27,13 @@ const id = (prefix: string) => `${prefix}_${randomBytes(8).toString('hex')}`;
 const code = () => `${randomBytes(2).toString('hex').toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`;
 const send = (socket: WebSocket, data: unknown) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(data)); };
 const publish = (room: Room, data: unknown) => room.clients.forEach((client) => send(client.socket, data));
-const state = (room: Room) => publish(room, { type: 'STATE', roomCode: room.code, state: room.state, players: room.players, serverTime: Date.now(), turnDeadline: room.turnDeadline || 0, turnDurationMs });
+const state = (room: Room) => {
+  publish(room, { type: 'STATE', roomCode: room.code, state: room.state, players: room.players, serverTime: Date.now(), turnDeadline: room.turnDeadline || 0, turnDurationMs });
+  if (room.state.phase === 'finished') for (const playerId of room.mediaPlayers) {
+    room.mediaPlayers.delete(playerId);
+    void removeMediaParticipant(serverInstanceId, room.code, playerId);
+  }
+};
 function syncState(client: Client) {
   const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
   if (room) send(client.socket, { type: 'STATE', roomCode: room.code, state: room.state, players: room.players, serverTime: Date.now(), turnDeadline: room.turnDeadline || 0, turnDurationMs, recovered: true });
@@ -92,7 +99,7 @@ function avatarMetadata(value: unknown): Pick<Player, 'avatarId'> {
 function createRoom(client: Client, name: string, computer = false, avatarId?: string) {
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
   const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors[0], ready: true, ...avatarMetadata(avatarId) };
-  const room: Room = { code: code(), players: [player], state: createGame([player]), clients: new Map([[client.playerId, client]]), createdAt: Date.now(), busyUntil: 0 };
+  const room: Room = { code: code(), players: [player], state: createGame([player]), clients: new Map([[client.playerId, client]]), mediaPlayers: new Set(), createdAt: Date.now(), busyUntil: 0 };
   if (computer) {
     const opponent: Player = { id: id('computer'), name: 'Bot', color: colors[1], ready: true, isComputer: true };
     room.computerId = opponent.id;
@@ -159,6 +166,7 @@ function leaveRoom(client: Client, acknowledge = false) {
   if (room) removeRoomPlayer(room, client.playerId, client, acknowledge);
 }
 function removeRoomPlayer(room: Room, playerId: string, client?: Client, acknowledge = false, reason = 'voluntary') {
+  if (room.mediaPlayers.delete(playerId)) void removeMediaParticipant(serverInstanceId, room.code, playerId);
   const turnDeparted = room.state.currentPlayer === playerId;
   room.state = removePlayer(room.state, playerId);
   room.players = room.state.players;
@@ -173,11 +181,34 @@ function removeRoomPlayer(room: Room, playerId: string, client?: Client, acknowl
   room.clients.delete(playerId);
   if (client) {
     client.roomCode = undefined;
+    client.mediaRequestedAt = undefined;
     if (acknowledge) send(client.socket, { type: 'LEFT_ROOM', roomCode: room.code, reason });
   }
   if (!room.players.length || (room.computerId && !room.players.some(player => player.id !== room.computerId))) rooms.delete(room.code);
 }
+async function joinMedia(client: Client) {
+  const socket = client.socket;
+  const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
+  const player = room?.players.find(player => player.id === client.playerId);
+  const error = (message: string) => send(socket, { type: 'MEDIA_ERROR', message, roomCode: room?.code || '' });
+  if (!room || !player || room.computerId || !['rolling', 'moving'].includes(room.state.phase)) {
+    return error('Camera and voice are available while playing online with friends.');
+  }
+  if (client.mediaRequestedAt && Date.now()-client.mediaRequestedAt < 3000) return error('Please wait a moment before reconnecting voice.');
+  client.mediaRequestedAt = Date.now();
+  try {
+    const credentials = await createMediaToken(serverInstanceId, room.code, player);
+    if (client.socket !== socket || client.roomCode !== room.code || !['rolling','moving'].includes(room.state.phase) || !room.players.some(player => player.id === client.playerId)) return;
+    room.mediaPlayers.add(client.playerId);
+    send(socket, { type: 'MEDIA_TOKEN', ...credentials });
+  } catch (cause) {
+    client.mediaRequestedAt = undefined;
+    error(cause instanceof Error && cause.message.startsWith('Video calls') ? cause.message : 'Voice and video could not connect. Please try again.');
+  }
+}
+
 function handle(client: Client, message: ClientMessage) {
+  if (message.type === 'MEDIA_JOIN') { void joinMedia(client); return; }
   if (message.type === 'PING') { send(client.socket, { type: 'PONG', serverTime: Date.now() }); return; }
   if (message.type === 'SYNC_STATE') { syncState(client); return; }
   if (message.type === 'CREATE_ROOM') return createRoom(client, message.name, false, message.avatarId);

@@ -21,7 +21,7 @@
     "godot:test:browser": "npm run godot:build:web && node scripts/test-godot-browser.mjs",
     "godot:build:web": "node scripts/godot.mjs build:web",
     "godot:preview:web": "node scripts/preview-godot.mjs",
-    "godot:build:android": "node scripts/godot.mjs build:android",
+    "godot:build:android": "npm run godot:media:android && node scripts/godot.mjs build:android",
     "dev": "vite",
     "web": "npm run godot:build:web && npm run godot:preview:web",
     "expo:web": "npm --prefix apps/mobile run web",
@@ -36,7 +36,11 @@
     "android:open": "npx cap open android",
     "test": "vitest run",
     "export:e2e": "cd apps/mobile && EXPO_PUBLIC_REALTIME_URL=ws://127.0.0.1:19551 npx expo export --platform web --output-dir dist-e2e --clear",
-    "test:browser": "npm run export:e2e && playwright test"
+    "test:browser": "npm run export:e2e && playwright test",
+    "godot:templates:android": "node scripts/install-godot-web-templates.mjs --android",
+    "godot:media:android": "node scripts/build-godot-media.mjs",
+    "godot:test:media": "npm run godot:build:web && node scripts/test-godot-media-browser.mjs",
+    "server:check": "tsc -p apps/game-server/tsconfig.json"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -49,7 +53,9 @@
     "@supabase/supabase-js": "latest",
     "dotenv": "latest",
     "@capacitor/core": "latest",
-    "@capacitor/android": "latest"
+    "@capacitor/android": "latest",
+    "livekit-client": "2.23.0",
+    "livekit-server-sdk": "2.19.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",
@@ -58,6 +64,7 @@
     "@types/react-dom": "latest",
     "@types/ws": "latest",
     "tsx": "latest",
-    "@capacitor/cli": "latest"
+    "@capacitor/cli": "latest",
+    "@types/node": "26.6.5"
   }
 }

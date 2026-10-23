@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +39,7 @@ else if (mode === 'build:web') {
 } else if (mode === 'build:android') {
   mkdirSync(path.join(project, 'dist-android'), { recursive: true });
   writeFileSync(path.join(project, 'dist-android/.gdignore'), '');
+  if (!existsSync(path.join(project,'android/build/build.gradle'))) args.push('--install-android-build-template');
   args.push('--headless', '--export-debug', 'Android', path.join(project, 'dist-android/rally-ludo.apk'));
 } else if (mode !== 'run') {
   console.error('Use run, editor, check, test, test:captures, test:computer, test:recovery, test:lives, test:leaving, build:web or build:android.');
@@ -48,6 +49,8 @@ if (extra.length) args.push('--', ...extra);
 const result = spawnSync(binary, args, { cwd: root, stdio: 'inherit' });
 if (result.error) console.error('Godot could not start. Install Godot 4.6.1 or set GODOT_BIN to its executable.');
 if (mode === 'build:web' && result.status === 0) {
+  copyFileSync(path.join(root,'node_modules/livekit-client/dist/livekit-client.umd.js'),path.join(project,'dist/livekit-client.umd.js'));
+  copyFileSync(path.join(root,'node_modules/livekit-client/LICENSE'),path.join(project,'dist/livekit-client.LICENSE'));
   const htmlPath = path.join(project, 'dist/index.html');
   const html = readFileSync(htmlPath, 'utf8');
   const nativeInputs = readFileSync(path.join(project, 'web/native_inputs.js'), 'utf8').replace(/<\/script/gi, '<\\/script');

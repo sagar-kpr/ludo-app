@@ -13,6 +13,11 @@ const StickerEffect = preload("res://scripts/sticker_effect.gd")
 const ModeCard = preload("res://scripts/mode_card.gd")
 const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
 const LoadingSpinner = preload("res://scripts/loading_spinner.gd")
+const MediaSession = preload("res://scripts/media_session.gd")
+const LobbySeats = preload("res://scripts/lobby_seats.gd")
+var call_media
+var call_error: AcceptDialog
+var media_layout_elapsed := 0.0
 const MenuGlyph = preload("res://scripts/menu_glyph.gd")
 var loading_overlay: Control
 var loading_label: Label
@@ -54,7 +59,7 @@ var notice: Label
 var name_input: LineEdit
 var join_input: LineEdit
 var room_label: Label
-var lobby_players: Label
+var lobby_players: VBoxContainer
 var create_button: Button
 var computer_button: Button
 var join_button: Button
@@ -106,6 +111,10 @@ var web_safe_top := 0.0
 var web_safe_bottom := 0.0
 
 func _process(delta: float) -> void:
+	media_layout_elapsed += delta
+	if is_instance_valid(call_media) and media_layout_elapsed >= 0.1:
+		media_layout_elapsed = 0
+		update_video_layout()
 	if is_instance_valid(sticker_picker) and sticker_picker.visible:
 		position_sticker_picker()
 	web_form_elapsed += delta
@@ -199,12 +208,24 @@ func _ready() -> void:
 		card.gift_pressed.connect(open_sticker_picker)
 		card.chat_pressed.connect(open_table_chat)
 		card.leave_pressed.connect(open_leave_confirmation)
-		card.camera_pressed.connect(func(): menu.popup_centered())
+		card.camera_pressed.connect(toggle_call)
 		card.dice.roll_contact.connect(func(settled: bool, strength: float):
 			feedback.cue("dice_settle" if settled else "dice",card.player_id == self_id,strength)
 		)
 	network = Realtime.new()
 	add_child(network)
+	call_media = MediaSession.new()
+	add_child(call_media)
+	call_media.credentials_requested.connect(func():
+		if not network.send_intent({"type":"MEDIA_JOIN"}):
+			call_media.requesting = false
+			call_media._on_status("error","Voice cannot connect while the game is offline.")
+	)
+	call_media.status_changed.connect(func(message: String): media_status.text = message)
+	call_media.user_error.connect(func(message: String):
+		call_error.dialog_text = message
+		call_error.popup_centered()
+	)
 	network.event_received.connect(_receive)
 	network.connection_changed.connect(func(connected: bool, detail: String):
 		online = connected
@@ -224,9 +245,6 @@ func _ready() -> void:
 		refresh_controls()
 	)
 	network.connect_server(endpoint)
-	if Engine.has_singleton("RallyMedia"):
-		var media = Engine.get_singleton("RallyMedia")
-		media.connect("media_status", func(_state: String, message: String): media_status.text = message)
 	get_viewport().size_changed.connect(_safe_area)
 	_safe_area()
 
@@ -587,7 +605,7 @@ func build_ui() -> void:
 		DisplayServer.clipboard_set(room_code)
 		notice.text = "Room code copied. Send it to your friends."
 	))
-	lobby_players = label("", 17, Design.INK)
+	lobby_players = LobbySeats.new()
 	lobby_card.add_child(lobby_players)
 	start_button = button("Start game", func(): send({"type":"START_GAME"}))
 	lobby.add_child(start_button)
@@ -738,6 +756,13 @@ func build_reconnect_overlay() -> void:
 	reconnect_overlay.hide()
 
 func build_dialogs() -> void:
+	call_error = AcceptDialog.new()
+	call_error.title = "Camera and voice"
+	call_error.min_size = Vector2i(280,140)
+	call_error.size = Vector2i(300,180)
+	call_error.dialog_autowrap = true
+	call_error.get_ok_button().custom_minimum_size = Vector2(90,44)
+	add_child(call_error)
 	recovery_lost_dialog = AcceptDialog.new()
 	recovery_lost_dialog.title = "Match connection lost"
 	recovery_lost_dialog.min_size = Vector2i(300,160)
@@ -864,7 +889,7 @@ func build_dialogs() -> void:
 			settings.add_child(sound_row)
 		else:
 			settings.add_child(toggle)
-	media_status = label("Camera and voice are not configured in this migration build.", 13, Design.MUTED)
+	media_status = label("Tap your camera icon in an online friend game to turn camera and microphone on or off.", 13, Design.MUTED)
 	settings.add_child(media_status)
 	settings.add_child(button("Retry server connection", func():
 		if room_code.is_empty():
@@ -1017,6 +1042,9 @@ func open_leave_confirmation() -> void:
 		leave_dialog.popup_centered()
 
 func return_home() -> void:
+	if is_instance_valid(call_media):
+		call_media.stop()
+	call_error.hide()
 	recovering_match = false
 	reconnect_overlay.hide()
 	cancel_input_previews()
@@ -1198,6 +1226,8 @@ func send(intent: Dictionary) -> void:
 		notice.text = "Cannot reach the game server."
 		return
 	pending = true
+	if intent.get("type","") == "LEAVE_GAME":
+		call_media.stop()
 	if intent.get("type","") == "MOVE_TOKEN":
 		board.begin_move_preview(str(intent.get("tokenId","")),int(game.get("dice",0)))
 	if intent.get("type","") == "ROLL_DICE":
@@ -1209,6 +1239,24 @@ func send(intent: Dictionary) -> void:
 		loading_label.text = "Starting Bot…" if intent.type == "CREATE_COMPUTER_GAME" else "Opening room…"
 		loading_overlay.show()
 	refresh_controls()
+
+func toggle_call() -> void:
+	if not online or recovering_match or room_code.is_empty() or game.get("phase","") not in ["rolling","moving"] or game.get("players",[]).any(func(player: Dictionary): return bool(player.get("isComputer",false))):
+		return
+	call_media.join(room_code,self_id)
+	call_media.toggle()
+
+func update_video_layout() -> void:
+	var entries: Array = []
+	for card in cards:
+		if card.is_visible_in_tree() and not card.player_id.is_empty():
+			var rect: Rect2 = card.avatar.get_global_rect()
+			entries.append({"id":card.player_id,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
+		card.camera_button.active = card.player_id == self_id and call_media.publishing
+	var covered := reconnect_overlay.visible or loading_overlay.visible
+	for dialog in [menu,chat_dialog,leave_dialog,sticker_picker,result,call_error]:
+		covered = covered or dialog.visible
+	call_media.update_layout({"visible":game_view.visible and not covered,"entries":entries,"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y})
 
 func cancel_input_previews() -> void:
 	board.cancel_move_preview()
@@ -1222,6 +1270,9 @@ func send_chat() -> void:
 			chat_input.clear()
 
 func _receive(event: Dictionary) -> void:
+	if event.get("type","") in ["MEDIA_TOKEN","MEDIA_ERROR"]:
+		call_media.receive(event)
+		return
 	if str(event.get("type","")) == "STATE":
 		var remaining := maxi(0,int(event.get("turnDeadline",0))-int(event.get("serverTime",0)))
 		event["deadlineTicks"] = Time.get_ticks_msec()+remaining if remaining > 0 else 0
@@ -1368,6 +1419,11 @@ func receive_chat(event: Dictionary) -> void:
 					card.chat.unread = true
 
 func show_state() -> void:
+	var friend_call: bool = game.get("phase","") in ["rolling","moving"] and not game.get("players",[]).any(func(player: Dictionary): return bool(player.get("isComputer",false)))
+	if friend_call and online:
+		call_media.join(room_code,self_id)
+	elif not friend_call:
+		call_media.stop()
 	var is_lobby: bool = game.get("phase") == "lobby"
 	home.hide()
 	lobby.visible = is_lobby
@@ -1378,11 +1434,7 @@ func show_state() -> void:
 	brand_label.add_theme_color_override("font_color",Color("f3f7ff") if not is_lobby else Design.INK)
 	notice.add_theme_color_override("font_color",Color("c2d6ef") if not is_lobby else Design.MUTED)
 	var players: Array = game.get("players",[])
-	var player_lines := PackedStringArray()
-	for seat in range(4):
-		var player: Dictionary = players[seat] if seat < players.size() else {}
-		player_lines.append("%s · %s%s" % [str(player.get("name","Waiting for friend")), Design.COLOR_NAMES.get(player.get("color",""),"Empty seat"), " · Host" if seat == 0 else ""])
-	lobby_players.text = "\n\n".join(player_lines)
+	lobby_players.apply_players(players,self_id)
 	board.apply_state(game,self_id)
 	if game.get("phase") == "finished":
 		var order: Array = game.get("finishOrder",[game.get("winner","")])
@@ -1468,6 +1520,10 @@ func refresh_controls() -> void:
 		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own)
 		if computer_match:
 			cards[seat].chat.hide()
+			cards[seat].camera_button.hide()
+		cards[seat].camera_button.active = own and is_instance_valid(call_media) and call_media.publishing
+		cards[seat].camera_button.tooltip_text = "Turn camera and microphone off" if own and is_instance_valid(call_media) and call_media.wanted else "Turn camera and microphone on"
+		cards[seat].camera_button.disabled = not online or recovering_match
 		cards[seat].visible = not player.is_empty()
 		cards[seat].leave_button.disabled = not online or pending or presenting
 		cards[seat].set_lives(int(game.get("timeoutLives",{}).get(player.get("id",""),5)))

@@ -9,6 +9,12 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
 # Gameplay initially runs in memory without Supabase credentials.
 # Add SUPABASE_URL and a fresh SUPABASE_SERVICE_ROLE_KEY in Render's dashboard
 # only if enabling persistence. Never commit credentials to this file.

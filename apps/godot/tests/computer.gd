@@ -49,8 +49,15 @@ func run() -> void:
 	check(client.cards[2].status_label.text != "Bot","Bot name appears once; the other heading slot is reserved for its timer")
 	check(client.cards[2].avatar.computer and client.cards[2].avatar.portrait.texture == null,"Bot keeps its robot avatar independently of human presets")
 	check(not client.cards[2].gift.visible and not client.cards[2].camera_button.visible and not client.cards[0].chat.visible,"Computer match hides unused social controls")
-	check(client.cards[0].camera_button.visible and client.cards[0].leave_button.visible,"Settings and leaving stay available")
+	check(not client.cards[0].camera_button.visible and client.cards[0].leave_button.visible,"Bot games hide calling while keeping leaving available")
 	check(client.board.pawns.size() == 8,"The existing board renders both players' four pawns")
+	var media_events: Array = []
+	client.network.event_received.connect(func(event: Dictionary):
+		if event.get("type","") in ["MEDIA_TOKEN","MEDIA_ERROR"]:
+			media_events.append(event)
+	)
+	client.network.send_intent({"type":"MEDIA_JOIN"})
+	check(await wait_until(func(): return not media_events.is_empty()) and media_events[0].type == "MEDIA_ERROR","Server blocks camera and voice access in Bot games")
 	client.network.event_received.connect(func(event: Dictionary):
 		if event.get("type") == "DICE_ROLLED" and event.get("playerId") == opponent.id:
 			computer_rolls.append(int(event.value))

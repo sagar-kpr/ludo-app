@@ -48,7 +48,8 @@ const dataRoot = process.platform === 'win32' ? process.env.APPDATA
   : process.env.XDG_DATA_HOME || path.join(homedir(),'.local/share');
 const destination = path.join(dataRoot,'godot/export_templates',`${version}.stable`);
 mkdirSync(destination,{ recursive:true });
-for (const file of ['web_nothreads_release.zip','web_nothreads_debug.zip']) {
+const android = process.argv.includes('--android');
+for (const file of android ? ['android_debug.apk','android_release.apk','android_source.zip'] : ['web_nothreads_release.zip','web_nothreads_debug.zip']) {
   const entry = entries.find(item => item.name === `templates/${file}`);
   if (!entry) throw new Error(`${file} missing from official archive`);
   const header = await range(entry.offset,entry.offset+29);
@@ -59,4 +60,4 @@ for (const file of ['web_nothreads_release.zip','web_nothreads_debug.zip']) {
   if (bytes.length !== entry.unpacked || crc32(bytes) !== entry.crc) throw new Error('Template integrity check failed');
   writeFileSync(path.join(destination,file),bytes);
 }
-console.log('Godot 4.6.1 single-thread web templates installed.');
+console.log(`Godot 4.6.1 ${android ? 'Android' : 'single-thread web'} templates installed.`);

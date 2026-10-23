@@ -201,7 +201,8 @@ change is needed. No deployment is included.
   retains the roll rhythm; sound and vibration remain independently switchable.
 - Godot Web/Android export presets and separate Firebase Godot config.
 - Kotlin Android plugin source with explicit permissions, LiveKit room lifecycle,
-  mic/camera publishing controls and status signals. **Not yet built/device-tested.**
+  mic/camera publishing controls, native participant rendering and status signals.
+  Debug/release AARs compile; physical-phone validation is still required.
 
 The engine's wire colors remain `coral/sun/mint/violet`, mapped visually to
 red/green/yellow/blue. This is an adapter, not a new second rules engine.
@@ -390,11 +391,9 @@ Rebuild after changing it. Never deploy `ws://localhost` or a private LAN URL.
 
 ## Android APK
 
-No APK has been produced. Godot's Android export needs JDK 17, Android SDK, and
-matching Godot Android export/Gradle build templates. These are not available
-in the current environment. Configure them in Godot Editor Settings → Export →
-Android, install the Android build template through Project → Install Android
-Build Template, then use the Android export preset.
+The Android debug APK can be exported with JDK 17, Android SDK 35 and the
+matching Godot templates. The local validation build uses an isolated toolchain
+under `.tools`; configure SDK/JDK paths in Godot Editor Settings on other machines.
 
 The new package is `com.rallyludo.godot` so migration builds do not overwrite an
 existing Expo installation. Choose the final package/signing identity before a
@@ -404,17 +403,16 @@ store release. The preset creates a debug APK for device testing:
 npm run godot:build:android
 ```
 
-For media, first build and install the plugin addon as described in
-[`android-plugin/README.md`](android-plugin/README.md). It is separate from the
-old root `android/` Capacitor project. Publishing camera tracks is **not** the
-same as rendering them in player cards; the latter is still missing.
+The Android command builds and installs the camera/audio addon before exporting.
+Web and Android share the same room-scoped LiveKit sessions and avatar slots.
+See [MEDIA.md](MEDIA.md) for credentials, permissions, 360p / 15 FPS adaptive
+video, receive-only participation, mixed-device testing and deployment steps.
 
 ## Remaining spec work — not production ready
 
-1. Compile/test the Kotlin bridge, add participant video rendering and bind
-   camera/mic state to stable player cards. Add browser JavaScript LiveKit bridge.
-2. Issue short-lived room-scoped media tokens on the server after checking
-   membership; keep API secrets server-only. Current preview never enables media.
+1. Test the compiled camera/audio plugin on a physical Android phone.
+2. Configure LiveKit credentials on the hosted game server and deploy the updated
+   clients; local credentials remain in ignored `.env`.
 3. Durable guest identity and authenticated room resume, event sequence/idempotency,
    timeouts, presence, state recovery after disconnect/server restart.
 4. Complete room readiness/leave/rematch lifecycle, invitations, avatars, Google

@@ -97,7 +97,7 @@ it('plays fair bot turns without spending lives, resumes, isolates friend rooms 
     const afterLeave = visitor.events.length;
     send(visitor, { type: 'SYNC_STATE' });
     expect((await wait(visitor, event => event.type === 'STATE', afterLeave)).roomCode).toBe(friendRoom.roomCode);
-    expect((await (await fetch(`http://127.0.0.1:${port}`)).json()).rooms).toBe(1);
+    expect(((await (await fetch(`http://127.0.0.1:${port}`)).json()) as { rooms: number }).rooms).toBe(1);
     const newStart = human.events.length;
     send(human, { type: 'CREATE_ROOM', name: 'Back to friends' });
     const fresh = await wait(human, event => event.type === 'STATE', newStart);

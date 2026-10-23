@@ -1,4 +1,4 @@
-# RallyMedia — Godot 4.6.1 Android LiveKit scaffold
+# RallyMedia — Godot 4.6.1 Android LiveKit bridge
 
 Standalone Android library and Godot Android **plugin v2**, owned entirely by this
 directory. It is independent of the repository's Capacitor/Expo Android projects.
@@ -69,7 +69,7 @@ Desktop and web exports do not provide the singleton.
 
 Registration uses manifest metadata
 `org.godotengine.plugin.v2.RallyMedia = com.rally.godot.media.RallyMedia`,
-`GodotPlugin.getPluginSignals()`, and `@UsedByGodot` on all five public methods.
+`GodotPlugin.getPluginSignals()`, and `@UsedByGodot` on the public methods.
 The exact snake-case method names are part of the API. This uses
 [Godot's v2 export flow](https://docs.godotengine.org/en/4.6/tutorials/platform/android/android_plugin.html);
 there is no v1 `.gdap` file.
@@ -125,8 +125,7 @@ dispatcher; LiveKit connection/media operations use Kotlin coroutines.
   connecting produce an error; they are not remembered for a later connection.
 - `request_media_permissions()` requests missing `RECORD_AUDIO` and `CAMERA`
   permissions together, only when invoked. It does not connect or enable media.
-  Pending requests are guarded. Partial denial reports each permission separately;
-  a granted microphone can still be enabled if the camera was denied. Permanent
+  Pending requests are guarded. The game toggle requires both permissions. Permanent
   denial requires the user to grant permission in Android Settings. Permission
   revocation/device errors are reported when an operation fails.
 - `disconnect_room()` cancels session coroutine work and releases the room.
@@ -140,7 +139,7 @@ Status values: `connecting`, `connected`, `reconnecting`, `reconnected`,
 `permissions_granted`, `permissions_denied`, `permission_required`, and `error`.
 Treat `status` as the machine-readable value and `message` as display text.
 `permissions_denied` also covers a cancelled/partial request; its message contains
-`microphone=true/false camera=true/false`. This scaffold exposes no SDK exception
+a user-facing permission instruction. This scaffold exposes no SDK exception
 text or token in its own signals/logging; application and SDK logging policies
 still need review for production.
 
@@ -154,34 +153,27 @@ stops its capture. Disconnect/release is the full session teardown path.
 
 ## Validation and limits
 
-Locally validated: Godot 4.6.1 headless `--check-only` parses `export_plugin.gd`;
-manifest XML and API/metadata/dependency consistency were checked; published
-Godot and LiveKit POMs and tagged upstream APIs were inspected.
+Both debug and release AARs were compiled with JDK 17, Gradle 8.11.1,
+Android SDK 35 and the pinned LiveKit SDK. The addon is now installed automatically
+by `npm run godot:media:android` and included by `npm run godot:build:android`.
+The native singleton still needs physical-phone permission/audio/video testing.
 
-```sh
-godot --headless --path . --check-only --script godot-addon/addons/rally_media/export_plugin.gd
-```
+Native video uses LiveKit `TextureViewRenderer` overlays at the existing avatar
+rectangles, with centered aspect-fill cropping and rounded clipping. Both local
+and remote participant tracks are rendered; remote audio uses the SDK's normal
+playback. The Godot bridge hides these views behind dialogs and reconnect UI.
+`set_publishing_enabled(true)` requests both missing runtime permissions, then
+publishes microphone and camera together only after both are granted. Passing
+false unpublishes/stops both tracks immediately, while retaining remote audio
+and video. `set_video_layout(json)` maps stable player identities to UI rectangles.
 
-**Not validated here:** Gradle configuration, Kotlin compilation, Android lint,
-APK/AAB export, runtime singleton discovery, R8 builds, or any device/LiveKit
-session. This environment has no Java, Gradle, or Android SDK available. No AAR
-was produced. Dependency downloads also require access to Google Maven, Maven
-Central, and JitPack.
+Video starts at 640×360 / 15 FPS. Adaptive stream, dynacast and simulcast are
+on; echo cancellation, noise suppression and automatic gain control are enabled.
+These are quality targets, not a guarantee against every hardware/network noise.
+See [the integrated media guide](../MEDIA.md) for backend configuration and web
+interoperability. No credentials are bundled in the plugin or APK.
 
-There is **no native video UI, video renderer, Godot texture bridge, participant
-tile UI, or local camera preview**. Camera enablement publishes a track only.
-Remote video may be subscribed by the SDK but cannot be displayed by this bridge.
-Bluetooth device selection/permissions, screen sharing, foreground services for
-ongoing calls, and background-call support are not implemented. LiveKit's own
-manifest may merge its screen-capture service declarations; this plugin never
-starts that service. Disconnect when your application leaves its intended media
-flow; background behavior needs a separate implementation and device validation.
-
-Before relying on this scaffold, build both AARs and export a test app. On physical
-devices verify singleton/signals, connect with both permissions denied, partial
-and permanent denial, microphone/camera off after every fresh connect, publishing
-to a second client, mute/disable behavior, repeated connect/disconnect, disconnect
-during connection/publishing, server disconnect/reconnect, and engine teardown.
-Check audio routing/echo, camera compatibility, multiple ABIs, WebRTC native
-library loading and 16 KB page-size devices. These hardware and packaging limits
-remain unverified; this is not a production media feature certification.
+Bluetooth selection, screen sharing, foreground/background-call services and
+background camera publishing are outside this playing-screen integration.
+Validate mixed web/APK calls, runtime permission denial, rotation, speaker and
+headset behavior on an Android device before publishing.
