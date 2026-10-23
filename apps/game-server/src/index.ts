@@ -18,6 +18,7 @@ const configuredTurnMs = Number(process.env.TURN_TIMEOUT_MS || 30000);
 const turnDurationMs = Number.isFinite(configuredTurnMs) ? Math.max(1000, Math.min(120000, configuredTurnMs)) : 30000;
 const rooms = new Map<string, Room>();
 const sessions = new Map<string, Client>();
+const serverInstanceId = randomBytes(8).toString('hex');
 const reconnectGraceMs = Math.max(500, Number(process.env.RECONNECT_GRACE_MS) || 90000);
 // The first two players occupy diagonal corners; later joins fill the others.
 const colors: Color[] = ['coral', 'mint', 'sun', 'violet'];
@@ -224,7 +225,7 @@ function handle(client: Client, message: ClientMessage) {
     publish(room, { type: 'STICKER', targetPlayerId: target.id, fromPlayerId: client.playerId, fromName: room.players.find((player) => player.id === client.playerId)?.name || 'Guest', sticker, at: Date.now() });
   }
 }
-const http = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ service: 'rally-ludo-realtime', rooms: rooms.size })); });
+const http = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ service: 'rally-ludo-realtime', rooms: rooms.size, serverInstanceId })); });
 const wss = new WebSocketServer({ server: http });
 const alive = new WeakSet<WebSocket>();
 setInterval(() => {
@@ -235,6 +236,11 @@ setInterval(() => {
   }
 }, 15000).unref();
 wss.on('connection', (socket, request) => {
+  // Protocol/socket errors belong to this connection, not the server process.
+  socket.on('error', error => {
+    console.warn('[realtime] connection error:', error.message);
+    socket.terminate();
+  });
   alive.add(socket);
   socket.on('pong', () => alive.add(socket));
   const token = new URL(request.url || '/', 'http://localhost').searchParams.get('session');
@@ -247,7 +253,7 @@ wss.on('connection', (socket, request) => {
   if (previousSocket !== socket) previousSocket.close();
   const room = client.roomCode ? rooms.get(client.roomCode) : undefined;
   if (room) room.clients.set(client.playerId, client);
-  send(socket, { type: 'CONNECTED', playerId: client.playerId, sessionToken: client.sessionToken, resumed: Boolean(room), recoveryAvailable: true });
+  send(socket, { type: 'CONNECTED', playerId: client.playerId, sessionToken: client.sessionToken, resumed: Boolean(room), recoveryAvailable: true, serverInstanceId });
   syncState(client);
   socket.on('message', raw => { if (client.socket !== socket) return; try { handle(client, JSON.parse(raw.toString()) as ClientMessage); } catch { fail(socket, 'Invalid message.'); } });
   socket.on('close', () => {
@@ -262,4 +268,4 @@ wss.on('connection', (socket, request) => {
     client.disconnectTimer.unref();
   });
 });
-const port = Number(process.env.PORT || 8787); http.listen(port, () => console.log(`Rally Ludo realtime server listening on http://localhost:${port} (${persistenceEnabled() ? 'Supabase persistence on' : 'local persistence only'})`));
+const port = Number(process.env.PORT || 8787); http.listen(port, () => console.log(`Rally Ludo realtime server listening on http://localhost:${port} (${persistenceEnabled() ? 'Supabase metadata on' : 'no database'}; matches in memory; instance ${serverInstanceId})`));

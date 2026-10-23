@@ -23,7 +23,7 @@ try {
     server.once('error', error => { clearTimeout(timer); reject(error); });
     server.once('exit', code => { clearTimeout(timer); reject(new Error(`Server exited: ${code}`)); });
   });
-  const runner = spawn(process.execPath, ['scripts/godot.mjs', livesTest ? 'test:lives' : computerTest ? 'test:computer' : process.argv[2] === 'leaving' ? 'test:leaving' : 'test', `--server=ws://127.0.0.1:${port}`], { stdio: 'inherit' });
+  const runner = spawn(process.execPath, ['scripts/godot.mjs', livesTest ? 'test:lives' : computerTest ? 'test:computer' : process.argv[2] === 'recovery' ? 'test:recovery' : process.argv[2] === 'leaving' ? 'test:leaving' : 'test', `--server=ws://127.0.0.1:${port}`], { stdio: 'inherit' });
   const timer = setTimeout(() => runner.kill(), 150000);
   const code = await new Promise(resolve => runner.once('exit', resolve));
   clearTimeout(timer);

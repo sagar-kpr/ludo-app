@@ -413,12 +413,32 @@ same as rendering them in player cards; the latter is still missing.
 7. Runtime schema validation/rate limits, persistence repair, monitoring and
    complete-match/network-fault/visual acceptance tests.
 
-Godot alone does not solve latency or networking reliability. The existing
-server still keeps active rooms in memory, does not restore membership after
-refresh/disconnect, and does not implement every regional Ludo rule variant.
-The UI says so rather than showing a fake successful reconnection. The current
-Supabase adapter is partial; this migration makes no claim that Firebase auth,
-Redis or durable PostgreSQL match history have been implemented.
+Godot alone does not solve latency or networking reliability. Active matches
+and sessions remain in server memory. Temporary disconnects can resume with the
+same session token during the default 90-second grace period; full page refresh
+does not preserve that token. A server restart or replacement still loses matches.
+The Supabase adapter stores room/member metadata and chat, not a restorable game
+snapshot. Durable match/session recovery remains separate work.
+
+### Connection recovery
+
+The server handles each WebSocket's protocol errors and terminates only the
+faulty connection. Previously, an unhandled socket error could crash the process,
+losing unrelated matches. Handshake/health responses and startup logs include a
+server-instance identifier so a replacement can be distinguished during recovery.
+
+The client polls and drains queued replies before checking heartbeat deadlines.
+A quiet connection receives a ping/state probe with a four-second reply window
+before replacement. Repeated focus notifications preserve an in-flight connection;
+recovery URLs retain a slash before query parameters for native Godot. Leaving
+clears the network room flag. A confirmed missing session shows a lost-match
+dialog rather than silently returning to the dashboard. These changes do not
+alter dice, moves, inactivity dots or grace periods.
+
+`npm run godot:test:recovery` exercises queued replies after a simulated stall,
+quiet-socket probes, reconnecting with the same player/room and all dots, failed
+recovery feedback, and dashboard probing after leaving. `npm test` includes a
+malformed-frame regression that verifies another A.I match remains alive.
 
 ### Leaving a match
 

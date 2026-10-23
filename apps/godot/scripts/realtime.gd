@@ -28,9 +28,11 @@ func _notification(what: int) -> void:
 func probe_connection() -> void:
 	if intentional_close or endpoint.is_empty():
 		return
+	if socket.get_ready_state() == WebSocketPeer.STATE_CONNECTING:
+		return
 	if socket.get_ready_state() != WebSocketPeer.STATE_OPEN:
 		connect_server(endpoint)
-	elif recovery_available:
+	elif recovery_available and not awaiting_probe:
 		awaiting_probe = true
 		connection_changed.emit(false,"Checking connection…")
 		last_ping_ms = Time.get_ticks_msec()
@@ -48,7 +50,13 @@ func connect_server(url: String) -> void:
 	connecting_since_ms = Time.get_ticks_msec()
 	last_reply_ms = connecting_since_ms
 	awaiting_probe = false
-	var target := endpoint
+	# Godot's native WebSocket parser requires a slash before a query on a
+	# bare host. Keep existing paths/query parameters when appending recovery.
+	var parts := endpoint.split("?",true,1)
+	var base: String = parts[0]
+	if not base.substr(base.find("://")+3).contains("/"):
+		base += "/"
+	var target := base+("?"+parts[1] if parts.size() > 1 else "")
 	if not session_token.is_empty():
 		target += ("&" if "?" in target else "?")+"session="+session_token.uri_encode()
 	var error := socket.connect_to_url(target)
@@ -57,28 +65,9 @@ func connect_server(url: String) -> void:
 		previous_state = WebSocketPeer.STATE_CLOSED
 
 func _process(delta: float) -> void:
-	visibility_elapsed += delta
-	if OS.has_feature("web") and visibility_elapsed >= 0.3:
-		visibility_elapsed = 0
-		if JavaScriptBridge.eval("Boolean(window.__rallyNeedsSync && (window.__rallyNeedsSync = false, true))",true):
-			probe_connection()
-	var now := Time.get_ticks_msec()
-	if socket.get_ready_state() == WebSocketPeer.STATE_CONNECTING and now-connecting_since_ms > 12000:
-		connect_server(endpoint)
-		return
-	if socket.get_ready_state() == WebSocketPeer.STATE_OPEN and previous_state == WebSocketPeer.STATE_OPEN and recovery_available:
-		if now-last_reply_ms > 12000:
-			connect_server(endpoint)
-			return
-		if now-last_ping_ms >= 5000:
-			last_ping_ms = now
-			send_intent({"type":"PING"})
-	if socket.get_ready_state() == WebSocketPeer.STATE_CLOSED and not intentional_close and not endpoint.is_empty():
-		retry_elapsed += delta
-		if retry_elapsed >= 2.0:
-			connect_server(endpoint)
-			return
+	# Consume queued replies before deciding a stalled frame means a dead socket.
 	socket.poll()
+	var now := Time.get_ticks_msec()
 	var state := socket.get_ready_state()
 	if state != previous_state:
 		previous_state = state
@@ -112,7 +101,35 @@ func _process(delta: float) -> void:
 				connection_changed.emit(true,"Connected")
 			elif parsed.type in ["ROOM_CREATED","ROOM_JOINED"]:
 				has_room = true
+			elif parsed.type == "LEFT_ROOM":
+				has_room = false
+				awaiting_probe = false
 			event_received.emit(parsed)
+	visibility_elapsed += delta
+	if OS.has_feature("web") and visibility_elapsed >= 0.3:
+		visibility_elapsed = 0
+		if JavaScriptBridge.eval("Boolean(window.__rallyNeedsSync && (window.__rallyNeedsSync = false, true))",true):
+			probe_connection()
+	state = socket.get_ready_state()
+	if state == WebSocketPeer.STATE_CONNECTING and now-connecting_since_ms > 12000:
+		connect_server(endpoint)
+		return
+	if state == WebSocketPeer.STATE_OPEN and recovery_available:
+		if awaiting_probe and now-last_ping_ms >= 4000:
+			connect_server(endpoint)
+			return
+		if now-last_reply_ms > 12000:
+			# Probe first: the render thread may simply have stopped sending pings.
+			if not awaiting_probe:
+				probe_connection()
+			return
+		if not awaiting_probe and now-last_ping_ms >= 5000:
+			last_ping_ms = now
+			send_intent({"type":"PING"})
+	if state == WebSocketPeer.STATE_CLOSED and not intentional_close and not endpoint.is_empty():
+		retry_elapsed += delta
+		if retry_elapsed >= 2.0:
+			connect_server(endpoint)
 
 func send_intent(event: Dictionary) -> bool:
 	if socket.get_ready_state() != WebSocketPeer.STATE_OPEN:

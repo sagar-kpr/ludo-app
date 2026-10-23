@@ -12,6 +12,7 @@
     "godot:test:leaving": "node scripts/test-godot.mjs leaving",
     "godot:test:captures": "node scripts/godot.mjs test:captures",
     "godot:test:computer": "node scripts/test-godot.mjs computer",
+    "godot:test:recovery": "node scripts/test-godot.mjs recovery",
     "godot:test:computer:browser": "npm run godot:build:web && node scripts/test-godot-computer-browser.mjs",
     "godot:test:avatars": "npm run godot:build:web && node scripts/test-godot-computer-browser.mjs --avatars",
     "godot:test:lives": "node scripts/test-godot.mjs lives",

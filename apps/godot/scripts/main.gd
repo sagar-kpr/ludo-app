@@ -54,6 +54,8 @@ var start_button: Button
 var cards: Array = []
 var game: Dictionary = {}
 var self_id := ""
+var server_instance_id := ""
+var recovery_lost_dialog: AcceptDialog
 var room_code := ""
 var online := false
 var pending := false
@@ -620,6 +622,11 @@ func build_ui() -> void:
 	loading_overlay.hide()
 
 func build_dialogs() -> void:
+	recovery_lost_dialog = AcceptDialog.new()
+	recovery_lost_dialog.title = "Match connection lost"
+	recovery_lost_dialog.min_size = Vector2i(300,160)
+	recovery_lost_dialog.get_ok_button().text = "Back to dashboard"
+	add_child(recovery_lost_dialog)
 	avatar_picker = PopupPanel.new()
 	avatar_picker.theme = theme
 	var avatar_surface := Design.surface(Color("14263f"),20,Color("426b91"))
@@ -1106,17 +1113,15 @@ func drain_events() -> void:
 func present_event(event: Dictionary) -> void:
 	match str(event.type):
 		"CONNECTED":
+			var next_instance := str(event.get("serverInstanceId",""))
+			var server_changed := not server_instance_id.is_empty() and not next_instance.is_empty() and next_instance != server_instance_id
+			server_instance_id = next_instance
 			if not room_code.is_empty() and not event.get("resumed",false):
-				room_code = ""
-				game = {}
-				latest_version = -1
-				content.get_node("SetupScroll").show()
-				home.show()
-				show_friends_setup(false)
-				lobby.hide()
-				game_view.hide()
-				_safe_area()
-				notice.text = "This room is no longer available. Please create or join a room."
+				push_warning("Match recovery unavailable; server instance changed: %s" % server_changed)
+				return_home()
+				notice.text = "The connection dropped and this match could not be restored."
+				recovery_lost_dialog.dialog_text = "The game server restarted or changed.\nThis match could not be restored.\n\nPlease start a new game." if server_changed else "Your connection was lost and the server\ncould not recover this match.\n\nPlease start a new game."
+				recovery_lost_dialog.popup_centered()
 			elif event.get("resumed",false):
 				notice.text = "Connection restored. Resuming your game…"
 			self_id = str(event.playerId)
