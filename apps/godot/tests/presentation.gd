@@ -47,10 +47,22 @@ func run() -> void:
 			var sound = client.feedback
 			var voice = sound.voices[(sound.next_voice+sound.voices.size()-1)%sound.voices.size()]
 			check(sound.last_cue == "step" and voice.stream == sound.samples["step"] and voice.playing and voice.get_playback_position() < 0.06, "Every landing starts a fresh hop sound on actor and observer")
-			check(voice.volume_db >= -20.0 and voice.volume_db <= -15.0, "Movement tap stays softer than dice and capture sounds")
+			check(voice.volume_db >= -14.0 and voice.volume_db <= -9.0, "Movement tap retains the existing boosted volume")
 		)
 	actor.self_id = "a"
 	observer.self_id = "b"
+	var preview = actor.cards[0].dice
+	preview.reduced_motion = false
+	preview.show_face(2)
+	preview.begin_roll_preview()
+	check(preview.rolling and preview.preview_pending and preview.settled_value == 2,"Roll tap starts a preview without guessing the result")
+	preview.preview_tween.custom_step(0.08)
+	check(not preview.die.rotation.is_equal_approx(preview.FACE_ROTATIONS[2]),"Dice spins while waiting for the server")
+	await preview.animate_roll(6)
+	check(not preview.rolling and not preview.preview_pending and preview.settled_value == 6,"Confirmed result replaces the preview and settles on the server face")
+	preview.begin_roll_preview()
+	preview.cancel_roll_preview()
+	check(not preview.rolling and preview.settled_value == 6 and preview.die.rotation.is_equal_approx(preview.FACE_ROTATIONS[6]),"Failed roll restores the previous face and stops the preview")
 	var actor_steps: Array[Vector3] = []
 	var observer_steps: Array[Vector3] = []
 	actor.board.step_landed.connect(func(id: String): actor_steps.append(actor.board.pawns[id].position))

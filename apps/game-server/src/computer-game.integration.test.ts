@@ -63,7 +63,7 @@ it('plays fair bot turns without spending lives, resumes, isolates friend rooms 
     expect(initial.state.currentPlayer).toBe(identity.playerId);
     const visitor = await connect();
     send(visitor, { type: 'JOIN_ROOM', code: initial.roomCode, name: 'Visitor' });
-    expect((await wait(visitor, event => event.type === 'ERROR')).message).toContain('A.I match');
+    expect((await wait(visitor, event => event.type === 'ERROR')).message).toContain('Bot match');
     send(visitor, { type: 'CREATE_ROOM', name: 'Friends', avatarId: '../outside.png' });
     const friendRoom = await wait(visitor, event => event.type === 'ROOM_CREATED');
     const friend = await connect();

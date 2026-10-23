@@ -94,7 +94,7 @@ function createRoom(client: Client, name: string, computer = false, avatarId?: s
   const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors[0], ready: true, ...avatarMetadata(avatarId) };
   const room: Room = { code: code(), players: [player], state: createGame([player]), clients: new Map([[client.playerId, client]]), createdAt: Date.now(), busyUntil: 0 };
   if (computer) {
-    const opponent: Player = { id: id('computer'), name: 'A.I', color: colors[1], ready: true, isComputer: true };
+    const opponent: Player = { id: id('computer'), name: 'Bot', color: colors[1], ready: true, isComputer: true };
     room.computerId = opponent.id;
     room.players.push(opponent);
     room.state = startGame(createGame(room.players));
@@ -106,7 +106,7 @@ function joinRoom(client: Client, value: string, name: string, avatarId?: string
   if (client.roomCode) return fail(client.socket, 'You already belong to a room.');
   const room = rooms.get(value.toUpperCase());
   if (!room) return fail(client.socket, 'Room not found. Check the invite code.');
-  if (room.computerId) return fail(client.socket, 'This is an A.I match. Create or join a friend room instead.');
+  if (room.computerId) return fail(client.socket, 'This is a Bot match. Create or join a friend room instead.');
   if (room.players.length >= 4) return fail(client.socket, 'This room is full.');
   if (room.state.phase !== 'lobby') return fail(client.socket, 'This match has already started.');
   const player: Player = { id: client.playerId, name: name.trim().slice(0, 18) || 'Guest', color: colors.find(color => !room.players.some(player => player.color === color))!, ready: true, ...avatarMetadata(avatarId) };

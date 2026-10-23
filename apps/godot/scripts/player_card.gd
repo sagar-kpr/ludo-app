@@ -127,7 +127,6 @@ func _ready() -> void:
 	avatar.custom_minimum_size = Vector2(72,72)
 	avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	lives = TimeoutLives.new()
-	portrait_column.add_child(lives)
 	status_label = Label.new()
 	status_label.custom_minimum_size.x = 50
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -160,6 +159,13 @@ func _ready() -> void:
 	gift.tooltip_text = "Send an emoji or animated sticker"
 	gift.pressed.connect(func(): gift_pressed.emit(player_id))
 	actions.add_child(gift)
+	# Keep timeout chances below the controls, clear of the active card frame.
+	var lives_margin := MarginContainer.new()
+	lives_margin.add_theme_constant_override("margin_left",8)
+	lives_margin.add_theme_constant_override("margin_top",2)
+	add_child(lives_margin)
+	lives_margin.add_child(lives)
+	lives.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	roll = Button.new()
 	roll.custom_minimum_size = Vector2(56,56)
 	roll.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -196,14 +202,15 @@ func _ready() -> void:
 func fit_width(available_width: float, viewport_height: float = 860.0, mobile_portrait: bool = false) -> void:
 	compact_portrait = mobile_portrait
 	compact_height = viewport_height < 680.0 or compact_portrait
-	custom_minimum_size.x = minf(152.0 if compact_portrait else 156.0 if compact_height else 180.0,available_width)
+	custom_minimum_size.x = minf(164.0 if compact_portrait else 168.0 if compact_height else 192.0,available_width)
 	var compact := available_width < 164.0
-	var portrait_size := 68.0 if compact_portrait else 60.0 if viewport_height < 450.0 else 64.0 if compact_height else 72.0 if compact else 80.0
+	var portrait_size := 80.0 if compact_portrait else 72.0 if viewport_height < 450.0 else 76.0 if compact_height else 84.0 if compact else 92.0
 	var dice_size := minf(portrait_size-1.0,54.0 if compact or compact_height else 68.0)
 	portrait_size = minf(portrait_size,custom_minimum_size.x-dice_size-(12.0 if compact or compact_height else 14.0)-16.0)
 	name_label.add_theme_font_size_override("font_size",13 if compact_portrait else 14)
 	set_rank(finish_rank)
 	avatar.custom_minimum_size = Vector2.ONE*portrait_size
+	lives.custom_minimum_size.x = portrait_size
 	roll.custom_minimum_size = Vector2.ONE*dice_size
 	dice.custom_minimum_size = Vector2.ONE*dice_size
 	dice_slot.custom_minimum_size = Vector2(dice_size,portrait_size)
@@ -212,13 +219,13 @@ func fit_width(available_width: float, viewport_height: float = 860.0, mobile_po
 	if panel.has_theme_stylebox_override("panel"):
 		var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
 		style.content_margin_top = 6 if compact_height else 8
-		style.content_margin_bottom = 10 if compact_height else 13
+		style.content_margin_bottom = 6 if compact_height else 8
 
 func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) -> void:
 	departed = bool(player.get("departed",false))
 	player_id = str(player.get("id", ""))
 	turn_own = own
-	name_label.text = "A.I" if player.get("isComputer",false) else str(player.get("name","Open seat"))
+	name_label.text = "Bot" if player.get("isComputer",false) else str(player.get("name","Open seat"))
 	var accent: Color = Design.COLORS.get(player.get("color",""),Color("789484"))
 	avatar.configure(accent,str(player.get("name","")).hash(),not player.is_empty())
 	avatar.computer = bool(player.get("isComputer",false))
@@ -234,10 +241,10 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) 
 	style.content_margin_left = 8
 	style.content_margin_right = 8
 	style.content_margin_top = 6 if compact_height else 8
-	style.content_margin_bottom = 10 if compact_height else 13
+	style.content_margin_bottom = 6 if compact_height else 8
 	panel.add_theme_stylebox_override("panel",style)
 	var computer := bool(player.get("isComputer",false))
-	status_label.text = "A.I" if computer else "You" if own else "" if not player.is_empty() else "Waiting"
+	status_label.text = "Bot" if computer else "You" if own else "" if not player.is_empty() else "Waiting"
 	status_label.add_theme_color_override("font_color",accent.lightened(0.35) if active else Color("b7cee8"))
 	name_label.add_theme_color_override("font_color",Color.WHITE if player.is_empty() else Design.INK)
 	roll.visible = active and not departed

@@ -1,6 +1,6 @@
-export const DICE_ROLL_MS = 1200;
-export const DICE_SETTLE_MS = 980;
-export const DICE_FACE_TIMES = [90,200,330,490,680,850];
+export const DICE_ROLL_MS = 600;
+export const DICE_SETTLE_MS = 490;
+export const DICE_FACE_TIMES = [45,100,165,245,340,425];
 export const DICE_PIPS: Record<number, number[]> = {
   1: [4], 2: [0,8], 3: [0,4,8], 4: [0,2,6,8], 5: [0,2,4,6,8], 6: [0,2,3,5,6,8],
 };

@@ -29,17 +29,27 @@ func run() -> void:
 		var friends_rect: Rect2 = client.friends_button.get_global_rect()
 		var computer_rect: Rect2 = client.computer_button.get_global_rect()
 		check(client.name_input.get_global_rect().end.y < friends_rect.position.y and client.avatar_button.get_global_rect().end.y < friends_rect.position.y,"Name and avatar stay above both mode cards")
-		print("Dashboard %s: friends %s AI %s" % [viewport_size,friends_rect,computer_rect])
+		print("Dashboard %s: friends %s Bot %s" % [viewport_size,friends_rect,computer_rect])
 		check(friends_rect.end.x <= computer_rect.position.x,"Mode cards never overlap")
 		check(absf(friends_rect.size.x-computer_rect.size.x) <= 1,"Mode cards keep balanced widths with pixel rounding")
 		check(friends_rect.size.x >= 135,"Cards remain usable on narrow phones")
 		check(computer_rect.end.x <= viewport_size.x,"Cards remain inside screen width")
-		client.friends_button.pressed.emit()
+		for card in [client.friends_button,client.computer_button]:
+			var action: Rect2 = card.play_now.get_global_rect()
+			check(card.get_global_rect().encloses(action),"Play Now stays inside its mode card")
+			var captions = card.get_child(1)
+			check(captions.get_child(2).get_global_rect().end.y <= action.position.y,"Card captions end at %s above Play Now at %s (%s)" % [captions.get_child(2).get_global_rect().end.y,action.position.y,viewport_size])
+		client.avatar_edit_button.pressed.emit()
+		check(client.avatar_picker.visible,"Avatar edit icon opens the existing picker")
+		client.avatar_picker.hide()
+		client.computer_button.set_available(false)
+		check(client.computer_button.play_now.disabled,"Bot Play Now shares the existing availability state")
+		client.friends_button.play_now.pressed.emit()
 		for frame in range(3):
 			await process_frame
 		check(client.friends_setup.visible and not client.dashboard.visible,"Friends opens its own setup screen")
 		check(not client.name_input.is_visible_in_tree() and client.join_input.is_visible_in_tree(),"Friend setup only shows room controls; the name lives on the dashboard")
-		check(not client.computer_button.is_visible_in_tree(),"AI card stays on the dashboard")
+		check(not client.computer_button.is_visible_in_tree(),"Bot card stays on the dashboard")
 		check(client.create_button.size.y >= 44 and client.join_button.size.y >= 44,"Room actions preserve touch target sizes")
 		client.name_input.text = "Remember me"
 		client.join_input.text = "ABCD-EF12"

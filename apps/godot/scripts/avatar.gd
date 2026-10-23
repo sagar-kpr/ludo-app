@@ -57,8 +57,7 @@ func _draw() -> void:
 	var background := StyleBoxFlat.new()
 	background.bg_color = Color("162c46").lerp(accent,0.20)
 	background.set_corner_radius_all(12)
-	background.set_border_width_all(1)
-	background.border_color = accent.lightened(0.25)
+	background.set_border_width_all(0)
 	background.shadow_color = Color(0,0,0,0.25)
 	background.shadow_size = 3
 	background.shadow_offset = Vector2(0,2)

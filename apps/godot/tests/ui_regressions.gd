@@ -84,14 +84,14 @@ func run() -> void:
 			check(client.get_viewport_rect().encloses(card.get_global_rect()),"Profile and actions fit even on narrow screens")
 			check(card.avatar.global_position.y-card.name_label.get_global_rect().end.y >= 4,"Player name has breathing room above the avatar")
 			check(card.name_label.get_global_rect().end.y <= card.panel.global_position.y,"Player name sits outside and above the portrait box")
-			check(card.panel.get_global_rect().end.y-card.lives.get_global_rect().end.y >= 10,"Life dots stay clear of the timer path")
+			check(card.lives.global_position.y >= card.actions.get_global_rect().end.y+4,"Life dots sit outside the profile below chat and camera controls")
 			var frame_style: StyleBoxFlat = card.panel.get_theme_stylebox("panel")
 			check(frame_style.border_width_left == 1,"Profile border remains thin for every color")
 			if card.roll.visible:
 				check(card.roll.global_position.x-card.avatar.get_global_rect().end.x >= 12,"Avatar and dice have a distinct gap")
 				check(card.avatar.size.y > card.roll.size.y and card.roll.size.y >= 48,"Avatar remains taller than the dice with a usable roll target")
 			if viewport_size.x < 640:
-				check(card.avatar.size.y <= 68 and card.size.y <= 160,"Larger phone portraits stay within the profile layout")
+				check(card.avatar.size.y <= 80 and card.size.y <= 176,"Larger phone portraits stay within the profile layout")
 				check(board_rect.size.x+1 >= card.size.x*2,"Phone board dominates the profile card width")
 			check(card.lives.remaining == 5,"Every player starts with five filled life dots")
 			check(is_equal_approx(card.lives.size.x,card.avatar.size.x),"Five dots span exactly the avatar width")

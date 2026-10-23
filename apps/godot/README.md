@@ -9,9 +9,13 @@ Android-specific LiveKit integration. The previous Expo client is preserved in
 The home dashboard shows a larger avatar selector and player-name field above two
 illustrated mode cards. Both modes use this shared identity. **Play with Friends**
 opens a separate screen containing create-room and join-code controls.
-Back navigation preserves entered values. **Play with AI** immediately starts a
+Back navigation preserves entered values. **Play with Bot** immediately starts a
 red-versus-yellow match against a server-controlled computer, using the saved
 player name or Guest. Leaving a game returns to the mode dashboard.
+The dashboard uses red Friends and blue Bot accent borders, gradient navy
+surfaces, a live connection badge, and an avatar pencil button. Each card's
+Play Now button calls the same action as the card itself. The browser name
+input hides behind the avatar picker and restores unchanged when it closes.
 This mode requires an internet connection and the updated game server.
 Mode navigation and room requests show a compact translucent loading overlay,
 which clears when the screen is ready or a request fails. In-game names sit
@@ -26,6 +30,14 @@ fades in, including the web's native input overlay. Reduce motion disables these
 effects. Dice use a closer camera and larger available card slots, preserving
 avatar spacing. Pawn landing taps retain their timing and soft tone with a 6 dB
 volume increase; captures and dice generation are unchanged.
+Dice start a visual spin immediately after a roll request is sent, then settle
+on the server's result in 600 ms. The shared dice presentation duration also
+keeps the server's input lock and automatic moves in sync with this faster roll.
+Publish the updated server together with the client for matching timing.
+During a match, a connection loss shows a Wi-Fi popup and reconnect spinner.
+Pawn/dice input stays blocked until the recovered match snapshot is applied;
+the popup then closes automatically. Browser offline/online events provide
+immediate feedback when the device loses its network connection.
 
 The computer uses the shared legal-move engine and the normal server dice. It
 prefers finishing, captures and safe squares, waits for animations, and does not
@@ -438,7 +450,7 @@ alter dice, moves, inactivity dots or grace periods.
 `npm run godot:test:recovery` exercises queued replies after a simulated stall,
 quiet-socket probes, reconnecting with the same player/room and all dots, failed
 recovery feedback, and dashboard probing after leaving. `npm test` includes a
-malformed-frame regression that verifies another A.I match remains alive.
+malformed-frame regression that verifies another Bot match remains alive.
 
 ### Leaving a match
 
@@ -477,7 +489,7 @@ cleanup, while the WebSocket suite verifies every emotion reaches both players.
 
 ### Five timeout chances
 
-Five dots beneath each avatar span the portrait width and use that player's
+Five dots below each profile's action icons span the enlarged portrait width and use that player's
 board color. Filled dots show the remaining chances; used dots become hollow.
 Each missed roll or move-selection deadline costs one chance from the same
 per-player pool. Manual actions do not charge or refill it. A normal automatic

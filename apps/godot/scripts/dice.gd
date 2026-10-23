@@ -2,6 +2,9 @@ extends SubViewportContainer
 
 signal roll_contact(settled: bool, strength: float)
 const CONTACT_TIMES = [0.0,0.06,0.13,0.22,0.34,0.49,0.68,0.87]
+const ROLL_SECONDS := 0.6
+var preview_tween: Tween
+var preview_pending := false
 
 var die: Node3D
 var viewport: SubViewport
@@ -167,7 +170,36 @@ func show_face(value: int) -> void:
 		die.scale = Vector3.ONE
 		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
+func begin_roll_preview() -> void:
+	if rolling:
+		return
+	rolling = true
+	preview_pending = true
+	if reduced_motion:
+		return
+	camera.size = 2.1
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# Spin immediately while awaiting the authoritative result; never pick a face.
+	var from := die.rotation
+	preview_tween = create_tween().set_loops()
+	preview_tween.tween_method(func(progress: float):
+		die.rotation = from+Vector3(TAU,TAU,TAU)*progress
+	,0.0,1.0,0.38)
+
+func cancel_roll_preview() -> void:
+	if not preview_pending:
+		return
+	preview_pending = false
+	if preview_tween and preview_tween.is_valid():
+		preview_tween.kill()
+	if rolling:
+		show_face(settled_value)
+	rolling = false
+
 func animate_roll(value: int) -> void:
+	preview_pending = false
+	if preview_tween and preview_tween.is_valid():
+		preview_tween.kill()
 	rolling = true
 	camera.size = 2.1
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -180,22 +212,22 @@ func animate_roll(value: int) -> void:
 			while contacts.next < CONTACT_TIMES.size() and progress >= CONTACT_TIMES[contacts.next]:
 				roll_contact.emit(false,1.0-progress*0.65)
 				contacts.next += 1
-			var ease := progress*progress*(3.0-2.0*progress)
+			var ease := 1.0-pow(1.0-progress,2.0)
 			die.rotation = from.lerp(target + Vector3(TAU*2,TAU*2,TAU), ease)
 			var lift := sin(progress*PI)
 			die.position.y = lift*0.20 + absf(sin(progress*PI*4.0))*lift*0.04
 			die.scale = Vector3(1.0-lift*0.025,1.0+lift*0.045,1.0-lift*0.025)
-		, 0.0, 1.0, 1.2)
+		, 0.0, 1.0, ROLL_SECONDS)
 		await tween.finished
 	else:
 		# Reduced motion keeps the same sound rhythm without spinning the die.
 		var previous := 0.0
 		for progress in CONTACT_TIMES:
 			if progress > previous:
-				await get_tree().create_timer((progress-previous)*1.2).timeout
+				await get_tree().create_timer((progress-previous)*ROLL_SECONDS).timeout
 			roll_contact.emit(false,1.0-progress*0.65)
 			previous = progress
-		await get_tree().create_timer((1.0-previous)*1.2).timeout
+		await get_tree().create_timer((1.0-previous)*ROLL_SECONDS).timeout
 	show_face(value)
 	roll_contact.emit(true,0.75)
 	rolling = false

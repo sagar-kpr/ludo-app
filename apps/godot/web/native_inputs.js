@@ -104,9 +104,9 @@
         input.setAttribute('autocorrect','off');
         input.spellcheck = false;
         input.setAttribute('enterkeyhint',field.id === 'rally-name' ? 'next' : 'done');
-        input.style.cssText = 'position:absolute;pointer-events:auto;box-sizing:border-box;background:#1b2038;color:#f5f6ff;border:1px solid #343851;border-radius:14px;padding:0 14px;font:16px Arial,sans-serif;outline:none;box-shadow:0 3px 8px rgba(0,0,0,.25);';
+        input.style.cssText = 'position:absolute;pointer-events:auto;box-sizing:border-box;background:linear-gradient(135deg,#172941,#12213a);color:#f5f6ff;border:1px solid #344864;border-radius:14px;padding:0 14px;font:16px Arial,sans-serif;outline:none;box-shadow:inset 0 1px 1px rgba(255,255,255,.025);';
         input.addEventListener('focus',() => { input.style.borderColor = '#3da8dc'; schedule(); });
-        input.addEventListener('blur',() => { input.style.borderColor = '#343851'; schedule(); });
+        input.addEventListener('blur',() => { input.style.borderColor = '#344864'; schedule(); });
         input.addEventListener('keydown',event => {
           if (event.key !== 'Enter') return;
           event.preventDefault();

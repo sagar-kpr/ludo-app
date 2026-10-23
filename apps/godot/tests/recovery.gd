@@ -30,7 +30,7 @@ func run() -> void:
 		finish()
 		return
 	client.request_room(false,true)
-	check(await wait_until(func(): return client.game.get("phase") == "rolling" and not client.pending and not client.loading_overlay.visible),"Start a real A.I match")
+	check(await wait_until(func(): return client.game.get("phase") == "rolling" and not client.pending and not client.loading_overlay.visible),"Start a real Bot match")
 	var original_id: String = client.self_id
 	var original_room: String = client.room_code
 	var net = client.network
@@ -42,31 +42,37 @@ func run() -> void:
 	net.last_reply_ms = Time.get_ticks_msec()-13000
 	net._process(0.02)
 	check(net.socket == original_socket,"Queued replies are drained before a stale clock can replace a healthy socket")
-	check(client.room_code == original_room and client.game_view.visible,"A stalled frame does not return an active A.I match to the dashboard")
+	check(client.room_code == original_room and client.game_view.visible,"A stalled frame does not return an active Bot match to the dashboard")
 	check(client.game.timeoutLives[original_id] == 5,"Recovery does not consume a player's inactivity dots")
 	# No queued reply: probe a quiet connection before tearing it down.
 	net.awaiting_probe = false
 	net.last_reply_ms = Time.get_ticks_msec()-13000
 	net._process(0.02)
 	check(net.socket == original_socket and net.awaiting_probe,"A quiet socket is probed before reconnecting")
+	check(client.reconnect_overlay.visible and not client.board.enabled,"Lost connection shows the Wi-Fi reconnect popup and blocks pawn input")
+	check(client.reconnect_status.get_line_count() == 1,"Reconnect status stays on one readable line beside the spinner")
 	await create_timer(0.12).timeout
 	net._process(0.02)
 	check(not net.awaiting_probe and net.socket == original_socket,"A successful probe preserves the same socket and match")
+	check(await wait_until(func(): return not client.reconnect_overlay.visible),"Recovered state dismisses the popup and resumes the match")
 	# Repeated focus/online notifications must not replace an in-flight connection.
 	net.connect_server(net.endpoint)
 	var connecting_socket = net.socket
 	net.probe_connection()
 	net.probe_connection()
 	check(net.socket == connecting_socket,"Focus notifications do not restart an in-flight reconnect")
+	check(client.reconnect_overlay.visible,"Reconnect popup stays visible during the handshake")
 	net.set_process(true)
 	check(await wait_until(func(): return client.online and client.self_id == original_id and not net.awaiting_probe),"Reconnect resumes the original player")
-	check(client.room_code == original_room and client.game_view.visible and not client.recovery_lost_dialog.visible,"A reconnect preserves the A.I table and does not show a false lost-match message")
+	check(client.room_code == original_room and client.game_view.visible and not client.recovery_lost_dialog.visible,"A reconnect preserves the Bot table and does not show a false lost-match message")
+	check(await wait_until(func(): return not client.reconnect_overlay.visible),"Reconnected match clears the Wi-Fi popup after restoring state")
 	check(not client.server_instance_id.is_empty(),"Handshake identifies the running server instance")
 	# A genuinely lost session must explain the loss instead of silently navigating.
 	net.session_token = "missing-session-for-recovery-test"
 	net.connect_server(net.endpoint)
 	check(await wait_until(func(): return client.recovery_lost_dialog.visible),"A server-confirmed missing session shows a clear recovery failure")
 	check(client.room_code.is_empty() and client.home.visible and client.board.pawns.is_empty(),"An unrecoverable match clears the old board and returns safely home")
+	check(not client.reconnect_overlay.visible,"Unrecoverable session replaces reconnect progress with the failure explanation")
 	client.recovery_lost_dialog.hide()
 	client.request_room(false)
 	check(await wait_until(func(): return client.game.get("phase") == "lobby" and not client.pending),"A new friend room works after a lost session")

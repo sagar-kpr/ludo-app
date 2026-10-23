@@ -63,10 +63,19 @@ try {
   if(process.argv.includes('--avatars')) {
     const presets=readdirSync('apps/godot/assets/avatars').filter(name=>/\.(png|jpg|jpeg|webp)$/i.test(name)).sort();
     assert(presets.length>=2,'Avatar regression uses at least two presets');
-    await page.touchscreen.tap(70,258);
-    await page.waitForTimeout(500);
+    await page.locator('#rally-name').fill('Guest');
+    await page.touchscreen.tap(102,285);
+    await page.locator('#rally-name').waitFor({state:'hidden'});
+    assert(await page.locator('#rally-code').isHidden(),'Browser fields stay behind the avatar modal');
+    await page.touchscreen.tap(320,258);
+    await page.locator('#rally-name').waitFor({state:'visible'});
+    assert.equal(await page.locator('#rally-name').inputValue(),'Guest','Closing the picker restores the unchanged name');
+    await page.touchscreen.tap(102,285);
+    await page.locator('#rally-name').waitFor({state:'hidden'});
     await page.screenshot({path:'test-results/avatar-picker-mobile.png'});
     await page.touchscreen.tap(196,360);
+    await page.locator('#rally-name').waitFor({state:'visible'});
+    assert.equal(await page.locator('#rally-name').inputValue(),'Guest','Avatar selection preserves the typed name');
     chosenAvatar=presets[1];
     // Godot flushes saved preferences into the browser's IndexedDB asynchronously.
     await page.waitForTimeout(6500);
@@ -74,9 +83,9 @@ try {
     await page.waitForFunction(()=>document.querySelector('#rally-name')&&!document.querySelector('#status')&&window.__events.some(event=>event.type==='CONNECTED'),null,{timeout:45000});
     await page.waitForTimeout(500);
   }
-  // Tap the real right-hand AI card, with no name or room fields required.
+  // Tap the actual Play Now controls, which forward to the existing mode actions.
   await page.evaluate(()=>window.__holdRoomMessages=true);
-  await page.touchscreen.tap(290,472);
+  await page.touchscreen.tap(290,562);
   await page.waitForTimeout(160);
   await page.screenshot({path:'test-results/loading-ai-mobile.png'});
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='STATE'&&event.state.players.some(player=>player.isComputer)),null,{timeout:15000});
@@ -87,6 +96,17 @@ try {
   assert.equal(match.players[0].name,'Guest');
   if(chosenAvatar)assert.equal(match.players[0].avatarId,chosenAvatar,'Chosen preset survives reload and reaches the server');
   await page.waitForFunction(()=>[...document.querySelectorAll('#rally-input-layer input')].every(input=>input.hidden));
+  if(process.argv.includes('--reconnect')) {
+    const restoredBefore=await page.evaluate(()=>window.__events.filter(event=>event.type==='STATE'&&event.recovered).length);
+    await context.setOffline(true);
+    await page.waitForFunction(()=>window.__rallyIsOffline===true);
+    await page.waitForTimeout(600);
+    await page.screenshot({path:'test-results/reconnecting-mobile.png'});
+    await context.setOffline(false);
+    await page.waitForFunction(count=>window.__events.filter(event=>event.type==='STATE'&&event.recovered).length>count,restoredBefore,{timeout:15000});
+    await page.waitForTimeout(500);
+    await page.screenshot({path:'test-results/reconnected-mobile.png'});
+  }
   // The canvas start tap exercises real UI input; subsequent messages exercise
   // the unchanged browser presentation queue with authoritative bot events.
   await page.evaluate(()=>window.__gameSocket.send(JSON.stringify({type:'ROLL_DICE'})));
@@ -99,7 +119,7 @@ try {
   await page.waitForFunction(()=>window.__events.some(event=>event.type==='LEFT_ROOM'),null,{timeout:15000});
   await page.waitForTimeout(1800);
   assert(await page.locator('#rally-name').isVisible(),'Leaving returns to the dashboard profile');
-  await page.touchscreen.tap(100,472);
+  await page.touchscreen.tap(100,562);
   await page.locator('#rally-code').waitFor({state:'visible'});
   assert(await page.locator('#rally-name').isHidden(),'Friends screen contains room controls only');
   assert.deepEqual(await page.evaluate(()=>window.__events.filter(event=>event.type==='ERROR')),[]);

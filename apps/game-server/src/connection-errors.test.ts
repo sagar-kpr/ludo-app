@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 import { expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
-it('keeps an active A.I room alive when another connection sends an invalid frame', async () => {
+it('keeps an active Bot room alive when another connection sends an invalid frame', async () => {
   const probe = createServer();
   await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
   const port = (probe.address() as { port: number }).port;

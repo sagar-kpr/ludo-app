@@ -35,7 +35,7 @@ func run() -> void:
 	check(not client.computer_button.disabled,"Play vs Computer is available when connected")
 	client.name_input.text = "Solo player"
 	client.computer_button.pressed.emit()
-	check(client.loading_overlay.visible,"A.I launch immediately shows loading feedback")
+	check(client.loading_overlay.visible,"Bot launch immediately shows loading feedback")
 	check(await wait_until(func(): return client.game.get("phase") == "rolling" and not client.pending),"Computer button starts directly without waiting in a lobby")
 	var players: Array = client.game.get("players",[])
 	check(await wait_until(func(): return not client.loading_overlay.visible),"Loading feedback clears after the match is displayed")
@@ -45,8 +45,8 @@ func run() -> void:
 		return
 	var opponent: Dictionary = players[1]
 	check(opponent.get("isComputer",false) and opponent.color == "mint","Computer occupies the opposite corner")
-	check(client.cards[2].player_id == opponent.id and client.cards[2].name_label.text == "A.I","Existing profile card identifies A.I")
-	check(client.cards[2].avatar.computer and client.cards[2].avatar.portrait.texture == null,"A.I keeps its robot avatar independently of human presets")
+	check(client.cards[2].player_id == opponent.id and client.cards[2].name_label.text == "Bot","Existing profile card identifies Bot")
+	check(client.cards[2].avatar.computer and client.cards[2].avatar.portrait.texture == null,"Bot keeps its robot avatar independently of human presets")
 	check(not client.cards[2].gift.visible and not client.cards[2].camera_button.visible and not client.cards[0].chat.visible,"Computer match hides unused social controls")
 	check(client.cards[0].camera_button.visible and client.cards[0].leave_button.visible,"Settings and leaving stay available")
 	check(client.board.pawns.size() == 8,"The existing board renders both players' four pawns")
@@ -57,6 +57,7 @@ func run() -> void:
 			computer_moves += 1
 	)
 	client.cards[0].roll.pressed.emit()
+	check(client.cards[0].dice.preview_pending,"Roll tap starts spinning before the server reply arrives")
 	check(await wait_until(func(): return computer_moves == 3 and client.game.get("currentPlayer") == client.self_id and not client.processing_events),"Computer rolls and moves through the normal presentation queue")
 	check(computer_rolls == [6,6,5],"Computer follows the same two-consecutive-sixes limit")
 	check(client.game.get("timeoutLives",{}).get(opponent.id) == 5,"Computer actions never spend inactivity dots")

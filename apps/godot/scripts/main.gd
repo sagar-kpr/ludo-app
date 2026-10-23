@@ -13,9 +13,14 @@ const StickerEffect = preload("res://scripts/sticker_effect.gd")
 const ModeCard = preload("res://scripts/mode_card.gd")
 const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
 const LoadingSpinner = preload("res://scripts/loading_spinner.gd")
+const MenuGlyph = preload("res://scripts/menu_glyph.gd")
 var loading_overlay: Control
 var loading_label: Label
 var room_loading := false
+var reconnect_overlay: Control
+var reconnect_title: Label
+var reconnect_status: Label
+var recovering_match := false
 var selected_avatar := ""
 var avatar_button: Button
 var avatar_preview: TextureRect
@@ -42,6 +47,9 @@ var setup_transition: Tween
 var lobby: VBoxContainer
 var game_view: VBoxContainer
 var status: Label
+var status_badge: PanelContainer
+var status_dot: Control
+var avatar_edit_button: Button
 var notice: Label
 var name_input: LineEdit
 var join_input: LineEdit
@@ -117,13 +125,14 @@ func sync_web_form() -> void:
 		JavaScriptBridge.eval(FileAccess.get_file_as_string("res://web/native_inputs.js"),true)
 		web_form_ready = true
 	var fields: Array = []
+	var form_covered := (is_instance_valid(loading_overlay) and loading_overlay.visible) or (is_instance_valid(avatar_picker) and avatar_picker.visible)
 	for entry in [[name_input,"rally-name","Your player name",18],[join_input,"rally-code","Friend’s room code",9]]:
 		var input: LineEdit = entry[0]
-		# During loading, draw the engine field behind the modal while its
+		# While a modal is open, draw the engine field behind it while its
 		# browser overlay is hidden, so the background form stays complete.
-		input.modulate.a = 1.0 if is_instance_valid(loading_overlay) and loading_overlay.visible else 0.0
+		input.modulate.a = 1.0 if form_covered else 0.0
 		var rect := input.get_global_rect()
-		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"visible":input.is_visible_in_tree() and not (is_instance_valid(loading_overlay) and loading_overlay.visible),"opacity":dashboard.modulate.a if input == name_input else friends_setup.modulate.a,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
+		fields.append({"id":entry[1],"label":entry[2],"max":entry[3],"value":input.text,"placeholder":input.placeholder_text,"visible":input.is_visible_in_tree() and not form_covered,"opacity":dashboard.modulate.a if input == name_input else friends_setup.modulate.a,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
 	var scroll := content.get_node("SetupScroll") as ScrollContainer
 	var clip := scroll.get_global_rect()
 	var data := {"fields":fields,"visible":home.is_visible_in_tree(),"width":get_viewport_rect().size.x,"height":get_viewport_rect().size.y,"clip":[clip.position.x,clip.position.y,clip.size.x,clip.size.y]}
@@ -201,6 +210,12 @@ func _ready() -> void:
 		online = connected
 		connection_detail = detail
 		if not online:
+			if not room_code.is_empty():
+				recovering_match = true
+				reconnect_title.text = "Checking connection" if detail == "Checking connection…" else "Connection lost"
+				for dialog in [menu,chat_dialog,leave_dialog,sticker_picker]:
+					dialog.hide()
+			cancel_dice_previews()
 			pending = false
 			room_loading = false
 			loading_overlay.hide()
@@ -245,7 +260,7 @@ func _safe_area() -> void:
 			card.fit_width((width_limit-16.0)*0.5,available.y,mobile_portrait)
 		set_game_layout(available.x >= 640.0 and available.x > available.y*1.25)
 		if using_landscape:
-			var profile_width := 156.0 if available.y < 680.0 else 180.0
+			var profile_width := 168.0 if available.y < 680.0 else 192.0
 			left_profiles.custom_minimum_size.x = profile_width
 			right_profiles.custom_minimum_size.x = profile_width
 			var chrome: float = inset_top + inset_bottom
@@ -377,16 +392,35 @@ func build_ui() -> void:
 	center.add_child(content)
 	var header := HBoxContainer.new()
 	content.add_child(header)
-	var brand := label("RALLY LUDO", 16, Design.INK)
+	var brand := label("RALLY LUDO", 18, Design.INK)
+	var brand_font := FontVariation.new()
+	brand_font.base_font = ThemeDB.fallback_font
+	brand_font.variation_embolden = 0.55
+	brand.add_theme_font_override("font",brand_font)
+	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	brand_label = brand
 	brand.autowrap_mode = TextServer.AUTOWRAP_OFF
 	header.add_child(brand)
-	status = label("Connecting…", 11, Design.MUTED)
+	var header_space := Control.new()
+	header_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(header_space)
+	status_badge = PanelContainer.new()
+	status_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	header.add_child(status_badge)
+	var badge_row := HBoxContainer.new()
+	badge_row.add_theme_constant_override("separation",7)
+	status_badge.add_child(badge_row)
+	status_dot = MenuGlyph.new()
+	status_dot.kind = "dot"
+	status_dot.custom_minimum_size = Vector2(10,10)
+	status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	badge_row.add_child(status_dot)
+	status = label("Connecting…", 12, Design.MUTED)
+	status.custom_minimum_size.x = 76
 	status.autowrap_mode = TextServer.AUTOWRAP_OFF
 	status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	header.add_child(status)
+	badge_row.add_child(status)
 	# Only home/lobby scroll. The board and player cards stay fixed during play.
 	var scroll := ScrollContainer.new()
 	scroll.name = "SetupScroll"
@@ -405,7 +439,7 @@ func build_ui() -> void:
 	dashboard.add_theme_constant_override("separation",22)
 	home.add_child(dashboard)
 	var breathing_room := Control.new()
-	breathing_room.custom_minimum_size.y = 12
+	breathing_room.custom_minimum_size.y = 5
 	dashboard.add_child(breathing_room)
 	var greeting := label("YOUR NEXT GREAT GAME",11,Color("8bc8ef"))
 	greeting.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -413,15 +447,20 @@ func build_ui() -> void:
 	var headline := label("Choose your table",30,Design.INK)
 	headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(headline)
-	var intro := label("Bring your friends or take on A.I.",15,Color("b9cde2"))
+	var intro := label("Bring your friends or take on a Bot.",15,Color("b9cde2"))
 	intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	dashboard.add_child(intro)
 	var profile := panel(dashboard)
+	var profile_style := Design.surface(Color("0b1930"),18,Color("344861"))
+	profile_style.content_margin_top = 6
+	profile_style.content_margin_bottom = 6
+	profile_style.shadow_size = 8
+	profile.get_parent().add_theme_stylebox_override("panel",profile_style)
 	var identity_row := HBoxContainer.new()
 	identity_row.add_theme_constant_override("separation",16)
 	profile.add_child(identity_row)
 	var avatar_column := VBoxContainer.new()
-	avatar_column.add_theme_constant_override("separation",6)
+	avatar_column.add_theme_constant_override("separation",4)
 	identity_row.add_child(avatar_column)
 	avatar_button = secondary_button("",open_avatar_picker)
 	avatar_button.tooltip_text = "Choose avatar"
@@ -439,7 +478,34 @@ func build_ui() -> void:
 	avatar_preview.offset_right = -5
 	avatar_preview.offset_top = 5
 	avatar_preview.offset_bottom = -5
-	var avatar_caption := label("Change avatar",12,Color("b9cde2"))
+	avatar_edit_button = Button.new()
+	avatar_edit_button.tooltip_text = "Change avatar"
+	avatar_edit_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	avatar_button.add_child(avatar_edit_button)
+	avatar_edit_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	avatar_edit_button.offset_left = -30
+	avatar_edit_button.offset_top = -30
+	avatar_edit_button.offset_right = 3
+	avatar_edit_button.offset_bottom = 3
+	for state in ["normal","hover","pressed","focus"]:
+		var edit_style := Design.surface(Color("1569ad") if state != "pressed" else Color("104c83"),18,Color("73caff"))
+		edit_style.set_border_width_all(1)
+		edit_style.shadow_size = 3
+		edit_style.content_margin_left = 0
+		edit_style.content_margin_right = 0
+		edit_style.content_margin_top = 0
+		edit_style.content_margin_bottom = 0
+		avatar_edit_button.add_theme_stylebox_override(state,edit_style)
+	var edit_icon := MenuGlyph.new()
+	edit_icon.kind = "edit"
+	avatar_edit_button.add_child(edit_icon)
+	edit_icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	edit_icon.offset_left = 5
+	edit_icon.offset_top = 5
+	edit_icon.offset_right = -5
+	edit_icon.offset_bottom = -5
+	avatar_edit_button.pressed.connect(open_avatar_picker)
+	var avatar_caption := label("Change avatar",11,Color("a9d5f5"))
 	avatar_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	avatar_column.add_child(avatar_caption)
 	var identity_fields := VBoxContainer.new()
@@ -458,8 +524,9 @@ func build_ui() -> void:
 	name_input.virtual_keyboard_enabled = true
 	name_input.focus_entered.connect(func(): scroll.ensure_control_visible(name_input))
 	configure_web_field(name_input)
+	name_input.add_theme_stylebox_override("normal",Design.surface(Color("15253f"),14,Color("344864")))
 	identity_fields.add_child(name_input)
-	identity_fields.add_child(label("For Friends and A.I",12,Color("b9cde2")))
+	identity_fields.add_child(label("For Friends and Bot",12,Color("b9cde2")))
 	var modes := HBoxContainer.new()
 	modes.add_theme_constant_override("separation",14)
 	dashboard.add_child(modes)
@@ -473,7 +540,7 @@ func build_ui() -> void:
 	computer_button.name = "ComputerMode"
 	computer_button.computer = true
 	computer_button.reduced_motion = reduced_motion
-	computer_button.tooltip_text = "Play with A.I · One-on-one against A.I. Internet connection required."
+	computer_button.tooltip_text = "Play with Bot · One-on-one against a Bot. Internet connection required."
 	computer_button.pressed.connect(func(): request_room(false,true))
 	modes.add_child(computer_button)
 	var dashboard_footer := label("One board. Good company. Your next win.",13,Color("99b5d1"))
@@ -620,6 +687,55 @@ func build_ui() -> void:
 	loading_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	loading_row.add_child(loading_label)
 	loading_overlay.hide()
+	build_reconnect_overlay()
+
+func build_reconnect_overlay() -> void:
+	reconnect_overlay = Control.new()
+	reconnect_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	reconnect_overlay.z_index = 110
+	reconnect_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(reconnect_overlay)
+	var shade := ColorRect.new()
+	shade.color = Color(0.02,0.04,0.08,0.22)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	reconnect_overlay.add_child(shade)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_STOP
+	reconnect_overlay.add_child(center)
+	var surface := PanelContainer.new()
+	surface.custom_minimum_size.x = 260
+	var style := Design.surface(Color(0.06,0.14,0.24,0.84),16,Color("426b91"))
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	style.content_margin_top = 14
+	style.content_margin_bottom = 14
+	surface.add_theme_stylebox_override("panel",style)
+	center.add_child(surface)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation",8)
+	surface.add_child(column)
+	var wifi := MenuGlyph.new()
+	wifi.kind = "wifi"
+	wifi.ink = Color("8bd7ff")
+	wifi.custom_minimum_size = Vector2(32,32)
+	wifi.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_child(wifi)
+	reconnect_title = label("Connection lost",18)
+	reconnect_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(reconnect_title)
+	var progress := HBoxContainer.new()
+	progress.alignment = BoxContainer.ALIGNMENT_CENTER
+	progress.add_theme_constant_override("separation",8)
+	column.add_child(progress)
+	progress.add_child(LoadingSpinner.new())
+	reconnect_status = label("Reconnecting…",14,Color("a9d5f5"))
+	reconnect_status.autowrap_mode = TextServer.AUTOWRAP_OFF
+	progress.add_child(reconnect_status)
+	var hint := label("Your game will resume when\nthe connection returns.",12,Design.MUTED)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(hint)
+	reconnect_overlay.hide()
 
 func build_dialogs() -> void:
 	recovery_lost_dialog = AcceptDialog.new()
@@ -635,6 +751,7 @@ func build_dialogs() -> void:
 	avatar_picker.add_theme_stylebox_override("panel",avatar_surface)
 	avatar_picker.min_size = Vector2i(280,240)
 	add_child(avatar_picker)
+	avatar_picker.popup_hide.connect(func(): sync_web_form.call_deferred())
 	var avatar_column := VBoxContainer.new()
 	avatar_column.add_theme_constant_override("separation",12)
 	avatar_picker.add_child(avatar_column)
@@ -900,6 +1017,9 @@ func open_leave_confirmation() -> void:
 		leave_dialog.popup_centered()
 
 func return_home() -> void:
+	recovering_match = false
+	reconnect_overlay.hide()
+	cancel_dice_previews()
 	room_loading = false
 	loading_overlay.hide()
 	room_code = ""
@@ -992,6 +1112,8 @@ func finish_room_loading() -> void:
 	loading_overlay.hide()
 
 func open_avatar_picker() -> void:
+	# Save the latest browser text before hiding its DOM overlay behind the popup.
+	sync_web_form()
 	avatar_scroll.custom_minimum_size.y = clampf(get_viewport_rect().size.y-210,80,210)
 	for child in avatar_grid.get_children():
 		avatar_grid.remove_child(child)
@@ -1025,6 +1147,7 @@ func open_avatar_picker() -> void:
 	avatar_picker.popup(Rect2i((Vector2i(get_viewport_rect().size)-picker_size)/2,picker_size))
 	avatar_picker.size = picker_size
 	avatar_picker.position = (Vector2i(get_viewport_rect().size)-picker_size)/2
+	sync_web_form()
 
 func select_avatar(id: String) -> void:
 	selected_avatar = id
@@ -1075,11 +1198,19 @@ func send(intent: Dictionary) -> void:
 		notice.text = "Cannot reach the game server."
 		return
 	pending = true
+	if intent.get("type","") == "ROLL_DICE":
+		for card in cards:
+			if card.player_id == self_id:
+				card.dice.begin_roll_preview()
 	if intent.get("type","") in ["CREATE_ROOM","JOIN_ROOM","CREATE_COMPUTER_GAME"]:
 		room_loading = true
-		loading_label.text = "Starting A.I…" if intent.type == "CREATE_COMPUTER_GAME" else "Opening room…"
+		loading_label.text = "Starting Bot…" if intent.type == "CREATE_COMPUTER_GAME" else "Opening room…"
 		loading_overlay.show()
 	refresh_controls()
+
+func cancel_dice_previews() -> void:
+	for card in cards:
+		card.dice.cancel_roll_preview()
 
 func send_chat() -> void:
 	var text := chat_input.text.strip_edges()
@@ -1130,6 +1261,7 @@ func present_event(event: Dictionary) -> void:
 			if event.get("reason","") == "inactivity":
 				notice.text = "Timer expired with no chances left. You left the game."
 		"ERROR":
+			cancel_dice_previews()
 			pending = false
 			room_loading = false
 			loading_overlay.hide()
@@ -1141,6 +1273,7 @@ func present_event(event: Dictionary) -> void:
 			home.hide()
 			lobby.show()
 		"STATE":
+			cancel_dice_previews()
 			room_code = str(event.get("roomCode",room_code))
 			room_label.text = room_code
 			var snapshot: Dictionary = event.state
@@ -1164,6 +1297,8 @@ func present_event(event: Dictionary) -> void:
 			turn_deadline_ticks = int(event.get("deadlineTicks",0))
 			turn_duration_ms = int(event.get("turnDurationMs",30000))
 			pending = false
+			if online and event.get("recovered",false):
+				recovering_match = false
 			show_state()
 			if room_loading:
 				finish_room_loading()
@@ -1173,6 +1308,7 @@ func present_event(event: Dictionary) -> void:
 				awaiting_move_state = false
 				presenting = false
 		"TURN_SKIPPED":
+			cancel_dice_previews()
 			if int(event.get("version",-1)) <= latest_version:
 				return
 			pending = false
@@ -1193,7 +1329,7 @@ func present_event(event: Dictionary) -> void:
 				roller.dice.reduced_motion = reduced_motion
 				await roller.dice.animate_roll(int(event.value))
 			else:
-				await get_tree().create_timer(1.2).timeout
+				await get_tree().create_timer(0.6).timeout
 			notice.text = "Rolled a %d" % int(event.value)
 			if roller:
 				roller.status_label.text = notice.text
@@ -1275,11 +1411,24 @@ func show_state() -> void:
 func refresh_controls() -> void:
 	if not is_instance_valid(status):
 		return
-	status.text = connection_detail + (" · Room " + room_code if not room_code.is_empty() else "")
-	status.add_theme_color_override("font_color", Color("c2d6ef") if game_view.visible else Design.MUTED if online else Design.FOREST)
+	if is_instance_valid(reconnect_overlay):
+		reconnect_overlay.visible = recovering_match and not room_code.is_empty()
+		reconnect_status.text = "Restoring your game…" if online else "Reconnecting…"
+	status.text = "Connected" if online else "Connecting…"
+	status.tooltip_text = connection_detail + (" · Room " + room_code if not room_code.is_empty() else "")
+	status.add_theme_color_override("font_color",Color("e3f1fb") if online else Color("e1c79a"))
+	status_dot.ink = Color("27dc93") if online else Color("f2b953")
+	status_dot.queue_redraw()
+	var badge_style := Design.surface(Color("082a37") if online else Color("292b36"),18,Color("135e58") if online else Color("64513a"))
+	badge_style.shadow_size = 0
+	badge_style.content_margin_left = 11
+	badge_style.content_margin_right = 11
+	badge_style.content_margin_top = 6
+	badge_style.content_margin_bottom = 6
+	status_badge.add_theme_stylebox_override("panel",badge_style)
 	create_button.disabled = not online or pending
-	computer_button.disabled = not online or pending
-	friends_button.disabled = pending
+	computer_button.set_available(online and not pending)
+	friends_button.set_available(not pending)
 	join_button.disabled = not online or pending
 	var players: Array = game.get("players",[])
 	var computer_match := false
@@ -1293,7 +1442,7 @@ func refresh_controls() -> void:
 	# Server deadlines include animation time. Reduced-motion clients must
 	# also wait until that lead-in ends before enabling the next input.
 	var phase_ready := turn_deadline_ticks == 0 or Time.get_ticks_msec() >= turn_deadline_ticks-turn_duration_ms
-	var can_act := online and not pending and not presenting and phase_ready and (turn_deadline_ticks == 0 or Time.get_ticks_msec() < turn_deadline_ticks)
+	var can_act := online and not recovering_match and not pending and not presenting and phase_ready and (turn_deadline_ticks == 0 or Time.get_ticks_msec() < turn_deadline_ticks)
 	board.enabled = can_act
 	for pawn in board.pawns.values():
 		pawn.selection_enabled = can_act
