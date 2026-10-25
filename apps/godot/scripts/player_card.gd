@@ -13,6 +13,8 @@ const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
 const ProfileAction = preload("res://scripts/profile_action.gd")
 const TimeoutLives = preload("res://scripts/timeout_lives.gd")
 const ProfileFrame = preload("res://scripts/profile_frame.gd")
+const WinCelebration = preload("res://scripts/win_celebration.gd")
+var celebration
 var panel
 var actions: HBoxContainer
 var chat
@@ -71,7 +73,7 @@ func update_clock() -> void:
 		status_label.text = "Left game"
 		return
 	if finish_rank >= 0:
-		status_label.text = ["Winner · 1st", "2nd", "3rd", "4th"][mini(finish_rank, 3)]
+		status_label.text = ["Winner · 1st", "2nd", "", "4th"][mini(finish_rank, 3)]
 		status_label.add_theme_color_override("font_color", Color("f9d342"))
 		return
 	if turn_active and turn_deadline_ticks > 0:
@@ -84,11 +86,16 @@ func update_clock() -> void:
 
 func set_rank(rank: int) -> void:
 	finish_rank = rank
+	if is_instance_valid(celebration):
+		celebration.configure(rank if not departed else -1, dice.reduced_motion)
 	status_label.custom_minimum_size.x = 66 if departed else 76 if rank == 0 else 38 if compact_portrait and rank < 0 else 50
 	if rank >= 0:
 		turn_active = false
 		roll.hide()
 		roll.disabled = true
+		if not departed:
+			var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
+			style.border_color = Color(WinCelebration.MEDALS[mini(rank,3)],0.55)
 	update_clock()
 
 func _ready() -> void:
@@ -198,6 +205,8 @@ func _ready() -> void:
 	invite.add_theme_stylebox_override("normal",invite_style)
 	invite.pressed.connect(func(): invite_pressed.emit())
 	row.add_child(invite)
+	celebration = WinCelebration.new()
+	panel.add_child(celebration)
 
 func fit_width(available_width: float, viewport_height: float = 860.0, mobile_portrait: bool = false) -> void:
 	compact_portrait = mobile_portrait

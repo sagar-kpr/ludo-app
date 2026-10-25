@@ -99,8 +99,8 @@ func run() -> void:
 	check(host.chat_dialog.visible,"Own chat icon opens table chat")
 	host.chat_dialog.hide()
 	host.cards[0].camera_button.pressed.emit()
-	check(host.menu.visible,"Own camera icon opens camera and voice settings")
-	host.menu.hide()
+	check(not host.menu.visible and host.call_error.visible,"Headless camera action explains the supported web/Android call platforms")
+	host.call_error.hide()
 	host.open_sticker_picker(host.self_id)
 	check(not host.sticker_picker.visible,"Self-targeted sticker picker is rejected")
 	check(is_equal_approx(host.cards[2].gift.global_position.x,host.cards[2].global_position.x),"Single opponent emoji sits at the beginning of its toolbar")
@@ -256,13 +256,18 @@ func run() -> void:
 	host.game = fixture.duplicate(true)
 	friend.game = fixture.duplicate(true)
 	host.show_state()
+	host.refresh_controls()
 	await process_frame
 	check(host.result.size.y < 420, "Ranked results remain a compact popup")
 	check(host.result.visible, "Host receives ranked results popup")
 	host.result.hide() # Both fixture clients share one root, unlike real devices.
 	friend.show_state()
 	check(friend.result.visible, "Friend receives ranked results popup")
-	check(host.restart_button.visible and not friend.restart_button.visible, "Restart control is visible only to host")
+	check(host.result.get_ok_button().text == "OK" and friend.result.get_ok_button().text == "OK", "Host and guests have the same OK action")
+	check(host.result.borderless and host.result.title.is_empty(), "Results have no match-complete heading")
+	check(friend.result_celebration.visible, "Results popup includes its own celebration")
+	check(host.cards[0].celebration.visible and host.cards[0].celebration.rank == 0, "First finisher receives a persistent celebration in their own card")
+	check(host.result_list.get_child_count() == 2, "Results show an avatar row for every ranked player")
 	check(host.result_stats.text.contains("1st") and host.result_stats.text.contains("2nd"), "Results list every placement")
 	check(host.board.rank_labels.size() == 2, "Each home box receives a placement badge")
 	fixture.phase = "rolling"
@@ -271,7 +276,9 @@ func run() -> void:
 		token.position = 0
 	host.game = fixture
 	host.show_state()
+	host.refresh_controls()
 	check(not host.result.visible and host.board.rank_labels.is_empty(), "Restart clears results and placement badges")
+	check(not host.cards[0].celebration.visible and not host.cards[0].celebration.is_processing(), "Restart clears the celebration and its animation processing")
 	for kind in host.StickerArt.CATALOG:
 		host.show_sticker({"targetPlayerId":friend.self_id,"fromPlayerId":host.self_id,"sticker":kind})
 		await process_frame

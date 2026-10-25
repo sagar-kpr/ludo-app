@@ -166,8 +166,7 @@ func run() -> void:
 		for index in range(4):
 			var pawn = board.pawns["%s-%d" % [color, index]]
 			pawn._process(0)
-			check(pawn.completed and pawn.finish_badge.visible, "Finished pawn has a visible completion check")
-			check(pawn.finish_badge.get_parent() == board.viewport, "Completion check uses an overlay above the 3D board")
+			check(pawn.completed, "Finished pawn remains completed without a tick overlay")
 			check(not pawn.legal_move and not pawn.highlight and not pawn.ring.visible and not pawn.glow_floor.visible, "Finished pawn cannot reactivate on a roll of one")
 			check(pawn.position.is_equal_approx(BoardMath.world(color, BoardMath.HOME, index)), "Finished pawn stays in its center triangle")
 			anchors[str(pawn.position)] = true
@@ -186,17 +185,15 @@ func run() -> void:
 	steps.clear()
 	await board.animate_move({"tokenId": "mint-0", "from": BoardMath.HOME - 1, "to": BoardMath.HOME, "durationMs": 240})
 	check(steps == ["mint-0"], "Finish requires exactly one last hop")
-	check(board.pawns["mint-0"].completed and board.pawns["mint-0"].finish_badge.visible, "Completion is shown as soon as the pawn lands")
-	var finished_pawn = board.pawns["mint-0"]
-	var badge_position: Vector2 = board.camera.unproject_position(finished_pawn.visual.to_global(Vector3(0, 1.46, 0.54))) - finished_pawn.finish_badge.size * 0.5
-	check(finished_pawn.finish_badge.position.is_equal_approx(badge_position), "Completion check is correctly placed before the next frame or snapshot")
+	check(board.pawns["mint-0"].completed, "Completion state is set as soon as the pawn lands")
+	check(board.viewport.find_children("CompletedPawnCheck", "", false, false).is_empty(), "Finished pawns have no tick overlays")
 	state.tokens[8].position = BoardMath.HOME
 	board.apply_state(state, "local")
 	check(board.pawns["mint-0"].position.is_equal_approx(BoardMath.world("mint", BoardMath.HOME, 0)), "Authoritative finish snapshot keeps the pawn in place")
 	for token in state.tokens:
 		token.position = 0
 	board.apply_state(state, "local")
-	check(board.pawns.values().all(func(pawn): return not pawn.completed and not pawn.finish_badge.visible), "Restart clears all pawn completion markers")
+	check(board.pawns.values().all(func(pawn): return not pawn.completed), "Restart clears every pawn completion state")
 	check(board.artwork_viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS,"Art cache never switches to continuous rendering")
 	board.queue_free()
 	await process_frame

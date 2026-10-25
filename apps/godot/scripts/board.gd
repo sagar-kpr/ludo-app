@@ -200,7 +200,6 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 			var pawn := Pawn.new()
 			world.add_child(pawn)
 			pawn.configure(id, BOARD_COLORS[token.color])
-			pawn.finish_badge = make_completion_check()
 			pawns[id] = pawn
 		var pawn: Node3D = pawns[id]
 		pawn.reduced_motion = reduced_motion
@@ -208,8 +207,6 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 		var completed := int(token.position) >= BoardMath.HOME
 		pawn.scale = Vector3.ONE * (0.64 if completed else 1.0)
 		pawn.set_completed(completed)
-		if completed:
-			place_completion_check(pawn)
 		pawn.legal_move = not completed and state.get("currentPlayer") == self_id and state.get("phase") == "moving" and token.color == active_color and BoardMath.legal(token, dice_value, state.get("tokens",[]))
 		var fits_roll: bool = state.get("phase") == "moving" and BoardMath.legal(token, dice_value, state.get("tokens",[]))
 		pawn.highlight = not completed and fits_roll and state.get("phase") in ["rolling","moving"] and token.color == (highlight_color if not highlight_color.is_empty() else active_color)
@@ -218,31 +215,6 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 	layout_stacks()
 	show_ranks(state)
 	show_departed(state)
-
-func make_completion_check() -> Control:
-	# Flat canvas overlay avoids 3D alpha sorting and font/glyph dependencies.
-	var badge := Control.new()
-	badge.name = "CompletedPawnCheck"
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	badge.size = Vector2(16, 16)
-	badge.draw.connect(func():
-		badge.draw_circle(Vector2(8, 8), 7, Design.GOLD)
-		badge.draw_circle(Vector2(8, 8), 6, Color("10213c"))
-		badge.draw_polyline(PackedVector2Array([Vector2(4, 8), Vector2(7, 11), Vector2(12, 5)]), Design.GOLD, 2.0, true)
-	)
-	viewport.add_child(badge)
-	badge.hide()
-	return badge
-
-func place_completion_check(pawn: Node3D) -> void:
-	# Changing between sidebars and rows reparents the board. A pawn's exit
-	# cleanup can free its canvas badge while retaining the pawn itself.
-	if not is_instance_valid(pawn.finish_badge):
-		pawn.finish_badge = make_completion_check()
-	pawn.finish_badge.visible = pawn.completed
-	# Keep the canvas overlay at the same visible size at any render density.
-	pawn.finish_badge.scale = Vector2(viewport.size)/size
-	pawn.finish_badge.position = camera.unproject_position(pawn.visual.to_global(Vector3(0, 1.46, 0.54))) - pawn.finish_badge.size * pawn.finish_badge.scale * 0.5
 
 func make_badge(text: String, color: Color, at: Vector3) -> Label3D:
 	var badge := Label3D.new()
@@ -315,9 +287,6 @@ func _process(_delta: float) -> void:
 		var id: String = badge.get_meta("pin","")
 		if pawns.has(id):
 			badge.position = pawns[id].visual.to_global(Vector3(0,1.05,0.51))
-	for pawn in pawns.values():
-		if pawn.completed:
-			place_completion_check(pawn)
 
 func show_ranks(state: Dictionary) -> void:
 	var order: Array = state.get("finishOrder",[])
@@ -332,7 +301,7 @@ func show_ranks(state: Dictionary) -> void:
 		var center := world_position(str(player.color),0,0).lerp(world_position(str(player.color),0,3),0.5)
 		# A crown-and-rank badge stays on the winner's home dock, matching the
 		# celebratory board treatment instead of only showing the results dialog.
-		var badge := make_badge("♛\n"+["1st","2nd","3rd","4th"][rank],BOARD_COLORS[player.color],center+Vector3(0,0.72,0.75))
+		var badge := make_badge("♛\n"+["1st","2nd","","4th"][rank],BOARD_COLORS[player.color],center+Vector3(0,0.72,0.75))
 		badge.font_size = 58
 		badge.pixel_size = 0.009
 		rank_labels[player.id] = badge
@@ -476,7 +445,6 @@ func animate_move(event: Dictionary) -> void:
 	if finish >= BoardMath.HOME:
 		pawns[id].scale = Vector3.ONE * 0.64
 		pawns[id].set_completed(true)
-		place_completion_check(pawns[id])
 	for captured_id in event.get("captured", []):
 		if pawns.has(captured_id):
 			token_captured.emit(id,str(captured_id))

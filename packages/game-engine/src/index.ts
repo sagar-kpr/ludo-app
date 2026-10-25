@@ -83,7 +83,13 @@ export function autoMoveToken(state: GameState): Token | undefined {
   if (state.phase !== 'moving' || !state.dice) return undefined;
   const color = state.players.find((player) => player.id === state.currentPlayer)?.color;
   const legal = state.tokens.filter((token) => token.color === color && canMove(token, state.dice, state.tokens));
-  return legal.length === 1 ? legal[0] : undefined;
+  const first = legal[0];
+  if (!first || legal.length === 1) return first;
+  // Same-color pawns sharing a safe star are interchangeable. Only skip the
+  // choice when every legal move starts there; base entry remains a choice.
+  const square = trackIndex(first);
+  return square !== null && SAFE_CELLS.includes(square) && legal.every(token => token.position === first.position)
+    ? first : undefined;
 }
 
 export function moveToken(state: GameState, tokenId: string): GameState {

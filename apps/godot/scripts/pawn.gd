@@ -23,7 +23,6 @@ var cell_shadow: MeshInstance3D
 var token_color := Color.WHITE
 var completed := false
 var departing := false
-var finish_badge: Control
 
 func lacquer(color: Color) -> ShaderMaterial:
 	# Satin enamel uses one soft light and finish for every player color.
@@ -235,8 +234,6 @@ func part(mesh: Mesh, at: Vector3, mat: Material) -> MeshInstance3D:
 
 func set_completed(value: bool) -> void:
 	completed = value
-	if is_instance_valid(finish_badge):
-		finish_badge.visible = value
 	if value:
 		legal_move = false
 		highlight = false
@@ -244,10 +241,6 @@ func set_completed(value: bool) -> void:
 		glow_floor.hide()
 		visual.position = Vector3.ZERO
 		visual.scale = Vector3.ONE
-
-func _exit_tree() -> void:
-	if is_instance_valid(finish_badge):
-		finish_badge.queue_free()
 
 func _process(delta: float) -> void:
 	if departing:
@@ -356,8 +349,6 @@ func vanish() -> void:
 	highlight = false
 	ring.hide()
 	glow_floor.hide()
-	if is_instance_valid(finish_badge):
-		finish_badge.hide()
 	var tween := create_tween()
 	tween.tween_method(func(amount: float):
 		for mesh in visual.get_children()+base_visual.get_children():

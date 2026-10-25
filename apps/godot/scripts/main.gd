@@ -15,6 +15,11 @@ const AvatarCatalog = preload("res://scripts/avatar_catalog.gd")
 const LoadingSpinner = preload("res://scripts/loading_spinner.gd")
 const MediaSession = preload("res://scripts/media_session.gd")
 const LobbySeats = preload("res://scripts/lobby_seats.gd")
+const MatchResults = preload("res://scripts/match_results.gd")
+const WinCelebration = preload("res://scripts/win_celebration.gd")
+var result_list
+var result_celebration
+var result_state: Dictionary = {}
 var call_media
 var call_error: AcceptDialog
 var media_layout_elapsed := 0.0
@@ -82,11 +87,8 @@ var chat_input: LineEdit
 var chat_dialog: AcceptDialog
 var menu: AcceptDialog
 var leave_dialog: ConfirmationDialog
-var exit_scheduled := false
 var result: AcceptDialog
 var result_stats: Label
-var restart_button: Button
-var result_home_button: Button
 var connection_detail := "Connecting…"
 var config := ConfigFile.new()
 var reduced_motion := false
@@ -535,7 +537,9 @@ func build_ui() -> void:
 	name_input = LineEdit.new()
 	name_input.placeholder_text = "Guest"
 	name_input.max_length = 18
-	name_input.text = str(config.get_value("player", "name", ""))
+	name_input.text = str(config.get_value("player", "name", "Guest")).strip_edges()
+	if name_input.text.is_empty():
+		name_input.text = "Guest"
 	name_input.custom_minimum_size.y = 52
 	name_input.focus_mode = Control.FOCUS_ALL
 	name_input.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -858,6 +862,7 @@ func build_dialogs() -> void:
 			pawn.reduced_motion = value
 		for card in cards:
 			card.dice.reduced_motion = value
+			card.set_rank(card.finish_rank)
 		for choice in sticker_grid.get_children():
 			var artwork = choice.get_child(0)
 			artwork.playing = artwork.kind in StickerArt.EMOTIONS and not value
@@ -900,26 +905,44 @@ func build_dialogs() -> void:
 	settings.add_child(label("Godot migration preview · Server-authoritative gameplay",12,Design.MUTED))
 	build_sticker_picker()
 	result = AcceptDialog.new()
-	result.title = "Match complete"
+	result.title = ""
+	result.borderless = true
+	result.dialog_hide_on_ok = false
+	result.dialog_close_on_escape = false
+	result.confirmed.connect(func(): send({"type":"LEAVE_GAME"}))
 	result.min_size = Vector2i(280,240)
+	var results_theme := theme.duplicate() as Theme
+	var window_frame := Design.surface(Color("102139"),16,Color("49617c"))
+	window_frame.border_width_top = 30
+	window_frame.border_width_left = 8
+	window_frame.border_width_right = 8
+	window_frame.border_width_bottom = 8
+	window_frame.shadow_size = 12
+	results_theme.set_stylebox("embedded_border","Window",window_frame)
+	results_theme.set_stylebox("embedded_unfocused_border","Window",window_frame)
+	results_theme.set_color("title_color","Window",Design.INK)
+	result.theme = results_theme
 	add_child(result)
 	var results_column := VBoxContainer.new()
-	results_column.add_theme_constant_override("separation",16)
+	results_column.add_theme_constant_override("separation",10)
 	var results_panel := PanelContainer.new()
 	results_panel.add_theme_stylebox_override("panel",Design.surface(Design.CREAM,16))
 	result.add_child(results_panel)
 	results_panel.add_child(results_column)
+	result_celebration = WinCelebration.new()
+	result_celebration.centered = true
+	result_celebration.custom_minimum_size.y = 64
+	results_column.add_child(result_celebration)
+	result.visibility_changed.connect(func():
+		if not result.visible:
+			result_celebration.configure(-1,reduced_motion)
+	)
 	result_stats = label("",14,Design.INK)
 	result_stats.autowrap_mode = TextServer.AUTOWRAP_OFF
+	result_stats.hide()
 	results_column.add_child(result_stats)
-	restart_button = button("Restart game",func(): send({"type":"RESTART_GAME"}))
-	results_column.add_child(restart_button)
-	result_home_button = secondary_button("Back to home",func(): send({"type":"LEAVE_GAME"}))
-	result_home_button.hide()
-	results_column.add_child(result_home_button)
-	var results_footer := label("Play again · Same room",12,Design.MUTED)
-	results_footer.autowrap_mode = TextServer.AUTOWRAP_OFF
-	results_column.add_child(results_footer)
+	result_list = MatchResults.new()
+	results_column.add_child(result_list)
 
 func build_sticker_picker() -> void:
 	sticker_picker = PopupPanel.new()
@@ -1057,7 +1080,7 @@ func return_home() -> void:
 	pending = false
 	presenting = false
 	awaiting_move_state = false
-	exit_scheduled = false
+	result_state = {}
 	board.apply_state({},self_id)
 	for dialog in [result,leave_dialog,chat_dialog,menu,sticker_picker]:
 		dialog.hide()
@@ -1069,14 +1092,6 @@ func return_home() -> void:
 	brand_label.add_theme_color_override("font_color",Design.INK)
 	notice.text = "Choose a mode to play again."
 	_safe_area()
-
-func finish_departure_match(code: String) -> void:
-	await get_tree().create_timer(4.0).timeout
-	if room_code == code and game.get("phase") == "finished" and online:
-		# Detach on the server too, so creating another room works immediately.
-		if network.send_intent({"type":"LEAVE_GAME"}):
-			pending = true
-			refresh_controls()
 
 func open_table_chat() -> void:
 	for card in cards:
@@ -1207,6 +1222,7 @@ func request_room(join: bool, computer: bool = false) -> void:
 	var player_name := name_input.text.strip_edges()
 	if player_name.is_empty():
 		player_name = "Guest"
+	name_input.text = player_name
 	config.set_value("player", "name", player_name)
 	config.save("user://preferences.cfg")
 	var code := join_input.text.strip_edges().to_upper()
@@ -1437,30 +1453,33 @@ func show_state() -> void:
 	lobby_players.apply_players(players,self_id)
 	board.apply_state(game,self_id)
 	if game.get("phase") == "finished":
-		var order: Array = game.get("finishOrder",[game.get("winner","")])
+		# Keep the final ranking intact while each player dismisses independently.
+		var first_result := result_state.is_empty()
+		if first_result:
+			result_state = game.duplicate(true)
+		var final_players: Array = result_state.get("players",[])
+		var order: Array = result_state.get("finishOrder",[result_state.get("winner","")])
 		var lines := PackedStringArray()
 		for rank in range(order.size()):
-			for player in players:
+			for player in final_players:
 				if player.id == order[rank]:
 					var home_count := 0
-					for token in game.get("tokens",[]):
+					for token in result_state.get("tokens",[]):
 						if token.color == player.color and int(token.position) >= BoardMath.HOME:
 							home_count += 1
 					lines.append("%s  %s · %d/4 home" % [["1st","2nd","3rd","4th"][rank],str(player.name),home_count])
 		result_stats.text = "\n\n".join(lines)
-		var last_player: bool = players.size() == 1 and not game.get("departedPlayers",[]).is_empty()
-		result_home_button.visible = players.any(func(player: Dictionary): return bool(player.get("isComputer",false)))
-		restart_button.visible = not last_player and not players.is_empty() and players[0].id == self_id
-		if last_player:
-			result_stats.text = str(players[0].name) + " wins!\n\nReturning to home…"
-			if not exit_scheduled:
-				exit_scheduled = true
-				finish_departure_match(room_code)
+		if first_result:
+			result_list.populate(result_state)
+		result_stats.hide()
 		if not result.visible:
 			chat_dialog.hide()
 			menu.hide()
 			result.popup_centered()
+			result_celebration.configure(0,reduced_motion)
+			result_list.reveal(reduced_motion)
 	else:
+		result_state = {}
 		result.hide()
 
 func refresh_controls() -> void:
@@ -1490,8 +1509,7 @@ func refresh_controls() -> void:
 	for player in players:
 		if player.get("isComputer",false):
 			computer_match = true
-	restart_button.disabled = not online or pending or presenting or players.size() < 2
-	result_home_button.disabled = not online or pending or presenting
+	result.get_ok_button().disabled = not online or pending or presenting
 	start_button.visible = not players.is_empty() and players[0].id == self_id
 	start_button.disabled = not online or pending or players.size() < 2
 	# Server deadlines include animation time. Reduced-motion clients must

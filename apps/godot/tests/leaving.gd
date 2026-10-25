@@ -69,8 +69,11 @@ func run() -> void:
 	friend.leave_dialog.confirmed.emit()
 	friend.leave_dialog.hide()
 	check(await wait_until(func(): return third.game.get("phase") == "finished"),"Last remaining player wins")
-	check(third.result.visible and third.result_stats.text.contains("wins!"),"Winner is announced")
-	check(await wait_until(func(): return third.home.visible),"Winner automatically returns home")
+	check(third.result.visible and third.result_list.get_child_count() == 1,"Winner is announced with an avatar")
+	await create_timer(4.2).timeout
+	check(third.result.visible and not third.home.visible,"Winner stays at the results until choosing OK")
+	third.result.confirmed.emit()
+	check(await wait_until(func(): return third.home.visible),"Winner returns home after OK")
 	check(third.room_code.is_empty(),"Winner detached from server room")
 	third.request_room(false)
 	check(await wait_until(func(): return not third.room_code.is_empty() and third.game.get("phase") == "lobby"),"Winner can immediately create another room")

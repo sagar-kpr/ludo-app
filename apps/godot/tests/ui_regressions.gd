@@ -112,9 +112,7 @@ func run() -> void:
 	dense_pawn.legal_move = true
 	var dense_point: Vector2 = client.board.display_point(client.board.camera.unproject_position(dense_pawn.visual.to_global(Vector3(0,0.75,0.22))))
 	check(client.board.token_at_screen(dense_point) == "0-0","Token selection maps correctly through the dense render target")
-	client.board.place_completion_check(dense_pawn)
-	var badge_size: Vector2 = dense_pawn.finish_badge.size*dense_pawn.finish_badge.scale*client.board.size/Vector2(client.board.viewport.size)
-	check(badge_size.is_equal_approx(Vector2(16,16)),"Completion badges retain their visible size on dense screens")
+	check(client.board.viewport.find_children("CompletedPawnCheck", "", false, false).is_empty(),"Dense screens have no completed-pawn tick overlays")
 	dense_pawn.legal_move = false
 	root.size = Vector2i(390,844)
 	for frame in range(5):

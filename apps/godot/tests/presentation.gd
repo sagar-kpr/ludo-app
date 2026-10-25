@@ -47,7 +47,7 @@ func run() -> void:
 			var sound = client.feedback
 			var voice = sound.voices[(sound.next_voice+sound.voices.size()-1)%sound.voices.size()]
 			check(sound.last_cue == "step" and voice.stream == sound.samples["step"] and voice.playing and voice.get_playback_position() < 0.06, "Every landing starts a fresh hop sound on actor and observer")
-			check(voice.volume_db >= -14.0 and voice.volume_db <= -9.0, "Movement tap retains the existing boosted volume")
+			check(is_equal_approx(voice.volume_db, -5.0), "Movement tap uses the louder volume on actor and observer")
 		)
 	actor.self_id = "a"
 	observer.self_id = "b"

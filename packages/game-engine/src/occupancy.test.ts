@@ -13,6 +13,27 @@ function fixture(seat: number, positions: number[], dice: number): GameState {
 
 describe('same-player occupancy and exact finishing', () => {
   for (const [seat, color] of COLORS.entries()) {
+    it(`${color}: automatically moves one of the only two pawns sharing a safe star, including on six`, () => {
+      for (let position = 1; position <= 51; position++) {
+        const square = trackIndex({ id: 'probe', color, position });
+        if (square === null || !SAFE_CELLS.includes(square)) continue;
+        for (let dice = 1; dice <= 6; dice++) {
+          const state = fixture(seat, [position, position, HOME, HOME], dice);
+          const selected = autoMoveToken(state)!;
+          expect(selected.id).toBe(`${seat}-0`);
+          const moved = moveToken(state, selected.id);
+          expect(moved.tokens.filter(token => token.color === color && token.position === position)).toHaveLength(1);
+          expect(moved.tokens.find(token => token.id === selected.id)?.position).toBe(position + dice);
+        }
+      }
+    });
+    it(`${color}: preserves choices when a base pawn or another position can also move`, () => {
+      expect(autoMoveToken(fixture(seat, [1, 1, 0, HOME], 6))).toBeUndefined();
+      expect(autoMoveToken(fixture(seat, [1, 1, 10, HOME], 6))).toBeUndefined();
+      expect(autoMoveToken(fixture(seat, [1, 1, 9, 9], 6))).toBeUndefined();
+      // Malformed ordinary-tile stacks do not gain the star-only shortcut.
+      expect(autoMoveToken(fixture(seat, [2, 2, HOME, HOME], 6))).toBeUndefined();
+    });
     it(`${color}: rejects every non-star occupied destination and permits star squares and finish docks`, () => {
       for (let position = 1; position < HOME; position++) {
         for (let dice = 1; dice <= 6; dice++) {

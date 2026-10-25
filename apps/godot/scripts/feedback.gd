@@ -55,7 +55,7 @@ func cue(kind: String, local_haptic: bool = false, strength: float = 1.0) -> voi
 		var voice := voices[next_voice]
 		next_voice = (next_voice+1)%voices.size()
 		voice.stream = samples[kind]
-		voice.volume_db = (-11.0 if kind == "step" else -16.0 if kind == "chat" else -10.0 if kind == "capture" else -12.0) + linear_to_db(clampf(strength,0.1,1.0))
+		voice.volume_db = (-5.0 if kind == "step" else -16.0 if kind == "chat" else -10.0 if kind == "capture" else -12.0) + linear_to_db(clampf(strength,0.1,1.0))
 		voice.pitch_scale = 0.90+strength*0.10 if kind == "dice" else 1.0
 		voice.play()
 	if haptics_enabled and local_haptic:
