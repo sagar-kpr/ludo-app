@@ -17,6 +17,7 @@ import livekit.org.webrtc.RendererCommon
 import kotlin.math.roundToInt
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import io.livekit.android.ConnectOptions
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
@@ -53,6 +54,10 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     private val videos = mutableMapOf<String, VideoSlot>()
     @Volatile private var destroyed = false
 
+    init {
+        Log.i(TAG, "Godot v2 RallyMedia plugin instance created")
+    }
+
     private class Session(val room: Room, parent: kotlinx.coroutines.Job) {
         val job = SupervisorJob(parent)
         val scope = CoroutineScope(job + Dispatchers.Main.immediate)
@@ -62,13 +67,22 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     override fun getPluginName() = "RallyMedia"
 
     override fun onMainCreate(activity: Activity?): View? {
-        if (activity == null) return null
-        return FrameLayout(activity).also { layer ->
-            layer.isClickable = false
-            layer.isFocusable = false
-            layer.clipChildren = true
-            layer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> applyVideoLayout() }
-            videoLayer = layer
+        if (activity == null) {
+            Log.e(TAG, "Plugin view initialization failed: Android activity is unavailable")
+            return null
+        }
+        return try {
+            FrameLayout(activity).also { layer ->
+                layer.isClickable = false
+                layer.isFocusable = false
+                layer.clipChildren = true
+                layer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> applyVideoLayout() }
+                videoLayer = layer
+                Log.i(TAG, "Godot v2 RallyMedia plugin initialized")
+            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Plugin view initialization failed (${error.javaClass.simpleName})")
+            null
         }
     }
 
@@ -79,6 +93,9 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     )
 
     private fun status(value: String, message: String) {
+        if (value in setOf("error", "permission_required", "permissions_denied")) {
+            Log.w(TAG, "$value: $message")
+        }
         if (!destroyed) emitSignal("media_status", value, message)
     }
 
@@ -103,6 +120,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
                 if (destroyed) return@withLock
                 val appContext = activity?.applicationContext
                 if (appContext == null) {
+                    Log.e(TAG, "Room initialization failed: Android application context is unavailable")
                     status("error", "Android activity is unavailable")
                     return@withLock
                 }
@@ -115,6 +133,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
                         videoTrackPublishDefaults = VideoTrackPublishDefaults(videoEncoding = VideoPreset169.H360.encoding.copy(maxFps = 15)),
                     )), ownerJob)
                 } catch (error: Exception) {
+                    Log.e(TAG, "LiveKit room creation failed (${error.javaClass.simpleName})")
                     status("error", "Room creation failed (${error.javaClass.simpleName})")
                     return@withLock
                 }
@@ -168,6 +187,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
                         throw cancelled
                     } catch (error: Exception) {
                         // SDK exception text may contain connection details; expose only the type.
+                        Log.e(TAG, "LiveKit connection failed (${error.javaClass.simpleName})")
                         finishSession(current, "error", "Connection failed (${error.javaClass.simpleName})")
                     }
                 }
@@ -300,6 +320,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
                     } catch (_: Exception) {
                         stopPublishing(current)
                         desiredPublishing = false
+                        Log.e(TAG, "Camera or microphone publishing failed; check runtime permissions and device availability")
                         status("error", "Camera or microphone could not start. Check permissions and close other camera apps.")
                     }
                 }
@@ -401,14 +422,17 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
             }
             val missing = MEDIA_PERMISSIONS.filterNot { hasPermission(it) }
             if (missing.isEmpty()) {
+                Log.i(TAG, "Camera and microphone permissions are already granted")
                 reportPermissions()
             } else {
                 permissionsPending = true
+                Log.i(TAG, "Requesting Android media permissions: ${missing.joinToString()}")
                 status("permissions_requested", "Requesting microphone and camera permissions")
                 try {
                     host.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST)
                 } catch (error: Exception) {
                     permissionsPending = false
+                    Log.e(TAG, "Android media permission request failed (${error.javaClass.simpleName})")
                     status("error", "Permission request failed (${error.javaClass.simpleName})")
                 }
             }
@@ -421,6 +445,9 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
         if (requestCode != PERMISSION_REQUEST) return
         scope.launch {
             permissionsPending = false
+            Log.i(TAG, "Media permission result received: ${permissions.mapIndexed { index, permission ->
+                "$permission=${grantResults.getOrNull(index) == PackageManager.PERMISSION_GRANTED}"
+            }.joinToString()}")
             reportPermissions()
             if (desiredPublishing && MEDIA_PERMISSIONS.all { hasPermission(it) }) set_publishing_enabled(true)
             else if (desiredPublishing) {
@@ -436,6 +463,9 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     private fun reportPermissions() {
         val microphone = hasPermission(Manifest.permission.RECORD_AUDIO)
         val camera = hasPermission(Manifest.permission.CAMERA)
+        if (!microphone || !camera) {
+            Log.w(TAG, "Media permissions missing: microphone=$microphone, camera=$camera")
+        }
         status(
             if (microphone && camera) "permissions_granted" else "permissions_denied",
             if (microphone && camera) "Camera and microphone permission granted."
@@ -444,6 +474,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     }
 
     override fun onMainDestroy() {
+        Log.i(TAG, "Godot v2 RallyMedia plugin shutting down")
         destroyed = true
         scope.launch {
             try {
@@ -456,6 +487,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     }
 
     private companion object {
+        const val TAG = "RallyMedia"
         const val PERMISSION_REQUEST = 0x524D
         val MEDIA_PERMISSIONS = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
     }

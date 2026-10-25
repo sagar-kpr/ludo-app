@@ -15,14 +15,48 @@ var native
 var web_ready := false
 var elapsed := 0.0
 var last_error := ""
+var native_probe_elapsed := 0.0
+var waiting_for_native := false
+var native_status_connected := false
+var native_discovery_logged := false
+var native_api_error_logged := false
 
 func _ready() -> void:
-	if Engine.has_singleton("RallyMedia"):
-		native = Engine.get_singleton("RallyMedia")
-		native.connect("media_status",_on_status)
+	_resolve_native()
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval(FileAccess.get_file_as_string("res://web/media.js"),true)
 		web_ready = true
+
+func _resolve_native() -> bool:
+	if web_ready or not Engine.has_singleton("RallyMedia"):
+		if OS.has_feature("android") and not native_discovery_logged:
+			push_warning("RallyMedia Android singleton is not available yet; discovery will retry.")
+			native_discovery_logged = true
+		native = null
+		return false
+	var candidate = Engine.get_singleton("RallyMedia")
+	if not is_instance_valid(candidate):
+		return false
+	var required_methods := ["connect_room", "disconnect_room", "set_publishing_enabled", "set_video_layout", "request_media_permissions"]
+	var missing_methods: Array[String] = []
+	for method_name in required_methods:
+		if not candidate.has_method(method_name):
+			missing_methods.append(method_name)
+	if not candidate.has_signal("media_status"):
+		missing_methods.append("signal media_status")
+	native = candidate
+	if not missing_methods.is_empty():
+		if not native_api_error_logged:
+			push_error("RallyMedia was discovered but its Android API is incomplete: %s" % ", ".join(missing_methods))
+			native_api_error_logged = true
+		return false
+	if not native_status_connected:
+		candidate.connect("media_status",_on_status)
+		native_status_connected = true
+	if not native_discovery_logged:
+		print("RallyMedia Android singleton discovered; required methods and media_status signal are available.")
+		native_discovery_logged = true
+	return true
 
 func join(code: String, player_id: String) -> void:
 	if room_code == code:
@@ -35,9 +69,11 @@ func join(code: String, player_id: String) -> void:
 func request_credentials() -> void:
 	if requesting or room_code.is_empty():
 		return
-	if not web_ready and not is_instance_valid(native):
+	if not web_ready and not _resolve_native():
+		waiting_for_native = OS.has_feature("android") and not Engine.has_singleton("RallyMedia")
 		_on_status("error","Camera and voice are available in the web game or the Android app with RallyMedia installed.")
 		return
+	waiting_for_native = false
 	requesting = true
 	request_started = Time.get_ticks_msec()
 	status_changed.emit("Connecting voice…")
@@ -70,10 +106,10 @@ func toggle() -> void:
 func apply_publishing(enabled: bool) -> void:
 	if web_ready:
 		JavaScriptBridge.eval("window.__rallyMedia.setPublishing("+JSON.stringify(enabled)+"); null",true)
-	elif is_instance_valid(native) and native.has_method("set_publishing_enabled"):
+	elif _resolve_native():
 		native.set_publishing_enabled(enabled)
 	elif enabled:
-		_on_status("error","Please install the updated Android media plugin to enable calls.")
+		_on_status("error","RallyMedia is unavailable or incomplete. Check the Android plugin diagnostics and install the latest APK.")
 
 func stop() -> void:
 	room_code = ""
@@ -82,6 +118,7 @@ func stop() -> void:
 	wanted = false
 	publishing = false
 	requesting = false
+	waiting_for_native = false
 	last_error = ""
 	if web_ready:
 		JavaScriptBridge.eval("window.__rallyMedia.disconnect(); window.__rallyMedia.poll(); null",true)
@@ -91,6 +128,8 @@ func stop() -> void:
 func _on_status(state: String, message: String) -> void:
 	if room_code.is_empty():
 		return
+	if state in ["error", "permissions_denied", "permission_required"]:
+		push_warning("RallyMedia status %s: %s" % [state, message])
 	match state:
 		"connected", "reconnected":
 			connected = true
@@ -121,6 +160,13 @@ func update_layout(data: Dictionary) -> void:
 		native.set_video_layout(JSON.stringify(data))
 
 func _process(delta: float) -> void:
+	if not web_ready and OS.has_feature("android"):
+		native_probe_elapsed += delta
+		if native_probe_elapsed >= 0.5:
+			native_probe_elapsed = 0.0
+			if _resolve_native() and waiting_for_native and not room_code.is_empty():
+				waiting_for_native = false
+				request_credentials()
 	if requesting and Time.get_ticks_msec()-request_started > 10000:
 		_on_status("error","Voice could not connect. Check your connection and try again.")
 	elapsed += delta
