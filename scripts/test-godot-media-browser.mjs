@@ -96,10 +96,36 @@ try {
     await page.mouse.click(point.x,point.y);
   }
   const video=(page,id)=>page.locator(`#rally-media-layer video[data-player-id="${id}"]`);
+  async function verifyRemoteAudio(page,id) {
+    await page.waitForFunction(id=>{
+      const element=document.querySelector(`#rally-media-layer audio[data-player-id="${id}"]`);
+      return element&&!element.paused&&!element.muted&&element.volume>0&&element.readyState>=2;
+    },id);
+    const peak=await page.evaluate(async id=>{
+      const element=document.querySelector(`#rally-media-layer audio[data-player-id="${id}"]`);
+      const context=new AudioContext();
+      const source=context.createMediaStreamSource(element.srcObject),analyser=context.createAnalyser();
+      source.connect(analyser);
+      await context.resume();
+      const samples=new Float32Array(analyser.fftSize);
+      let peak=0;
+      const deadline=performance.now()+8000;
+      while(performance.now()<deadline&&peak<0.0001) {
+        analyser.getFloatTimeDomainData(samples);
+        for(const value of samples)peak=Math.max(peak,Math.abs(value));
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      source.disconnect();
+      await context.close();
+      return peak;
+    },id);
+    assert(peak>0.0001,'Remote audio contains a non-silent microphone signal and its playback element is running');
+  }
   await tapCamera(host,hostId,false);
   for(const page of [host,friend]) await page.waitForFunction(id=>{const el=document.querySelector(`#rally-media-layer video[data-player-id="${id}"]`);return el&&!el.hidden&&el.videoWidth>0&&el.readyState>=2;},hostId,{timeout:30000});
   assert.equal(await video(friend,friendId).count(),0,'Watching another player does not turn on the receiver camera');
   await friend.waitForFunction(id=>{const el=document.querySelector(`#rally-media-layer audio[data-player-id="${id}"]`);return el?.srcObject?.getAudioTracks().some(track=>track.readyState==='live');},hostId);
+  await verifyRemoteAudio(friend,hostId);
   assert(await video(host,hostId).evaluate(el=>el.videoWidth<=640&&el.videoHeight<=360),'Local video is capped at 360p');
   assert(await video(host,hostId).evaluate(el=>el.srcObject.getVideoTracks()[0].getSettings().frameRate<=15),'Camera capture is capped at 15 FPS');
   await tapCamera(friend,friendId,true);
@@ -115,6 +141,7 @@ try {
   assert(await host.evaluate(()=>window.__oldMediaTracks.every(track=>track.readyState==='ended')),'Turning off releases local capture');
   assert(await video(host,friendId).isVisible(),'A camera-off player still receives the other player video');
   await host.waitForFunction(id=>document.querySelector(`#rally-media-layer audio[data-player-id="${id}"]`)?.srcObject?.getAudioTracks().some(track=>track.readyState==='live'),friendId);
+  await verifyRemoteAudio(host,friendId);
   await send(friend,{type:'LEAVE_GAME'});
   await host.waitForFunction(id=>!document.querySelector(`#rally-media-layer video[data-player-id="${id}"]`),friendId,{timeout:15000});
   assert.deepEqual(errors,[],'No JavaScript runtime errors during mixed-device calls');

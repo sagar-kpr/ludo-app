@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { androidBuildEnvironment, configureGodotAndroid } from './android-build-env.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const project = path.join(root, 'apps/godot');
@@ -9,6 +10,7 @@ const bundled = path.join(root, '.tools/godot/Godot_v4.6.1-stable_linux.x86_64')
 const binary = process.env.GODOT_BIN || (existsSync(bundled) ? bundled : 'godot');
 const mode = process.argv[2] || 'run';
 const extra = process.argv.slice(3);
+let env = process.env;
 let args = ['--path', project];
 if (mode === 'editor') args.push('--editor');
 else if (mode === 'check') {
@@ -37,6 +39,13 @@ else if (mode === 'build:web') {
   writeFileSync(path.join(project, 'dist/.gdignore'), '');
   args.push('--headless', '--export-release', 'Web', path.join(project, 'dist/index.html'));
 } else if (mode === 'build:android') {
+  env = androidBuildEnvironment();
+  try {
+    configureGodotAndroid(env);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
   mkdirSync(path.join(project, 'dist-android'), { recursive: true });
   writeFileSync(path.join(project, 'dist-android/.gdignore'), '');
   if (!existsSync(path.join(project,'android/build/build.gradle'))) args.push('--install-android-build-template');
@@ -46,7 +55,7 @@ else if (mode === 'build:web') {
   process.exit(1);
 }
 if (extra.length) args.push('--', ...extra);
-const result = spawnSync(binary, args, { cwd: root, stdio: 'inherit' });
+const result = spawnSync(binary, args, { cwd: root, env, stdio: 'inherit' });
 if (result.error) console.error('Godot could not start. Install Godot 4.6.1 or set GODOT_BIN to its executable.');
 if (mode === 'build:web' && result.status === 0) {
   copyFileSync(path.join(root,'node_modules/livekit-client/dist/livekit-client.umd.js'),path.join(project,'dist/livekit-client.umd.js'));

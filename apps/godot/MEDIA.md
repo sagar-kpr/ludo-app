@@ -58,8 +58,11 @@ the player receive-only and displays a retry instruction.
 ## Android build
 
 Install JDK 17, Gradle 8.11.1, Android SDK 35 / build-tools 35.0.1 and Godot 4.6.1.
-Set `JAVA_HOME`, `ANDROID_HOME`, and optionally `GRADLE_BIN`, and configure the
-same SDK/JDK in Godot's Android export settings.
+The build automatically uses the project-local toolchain in
+`.tools/media-android` when available. To use a different installation, set
+`JAVA_HOME`, `ANDROID_HOME` (or `ANDROID_SDK_ROOT`), and optionally `GRADLE_BIN`.
+The export command writes the matching SDK/JDK paths into project-local Godot
+editor settings under `.tools/godot-config`, so no manual editor setup is needed.
 
 ```sh
 npm run godot:templates:android
