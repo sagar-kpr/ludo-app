@@ -24,6 +24,7 @@
     "godot:build:web": "node scripts/godot.mjs build:web",
     "godot:preview:web": "node scripts/preview-godot.mjs",
     "godot:build:android": "npm run godot:media:android && node scripts/godot.mjs build:android",
+    "godot:build:android:release": "npm run godot:media:android && node scripts/godot.mjs build:android:release",
     "dev": "vite",
     "web": "npm run godot:build:web && npm run godot:preview:web",
     "expo:web": "npm --prefix apps/mobile run web",

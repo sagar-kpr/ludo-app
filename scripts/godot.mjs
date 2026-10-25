@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { androidBuildEnvironment, configureGodotAndroid } from './android-build-env.mjs';
+import { configureAndroidReleaseSigning } from './android-release-signing.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const project = path.join(root, 'apps/godot');
@@ -39,10 +40,11 @@ else if (mode === 'build:web') {
   mkdirSync(path.join(project, 'dist'), { recursive: true });
   writeFileSync(path.join(project, 'dist/.gdignore'), '');
   args.push('--headless', '--export-release', 'Web', path.join(project, 'dist/index.html'));
-} else if (mode === 'build:android') {
+} else if (mode === 'build:android' || mode === 'build:android:release') {
   env = androidBuildEnvironment();
   try {
     configureGodotAndroid(env);
+    if (mode === 'build:android:release') configureAndroidReleaseSigning(env);
   } catch (error) {
     console.error(error.message);
     process.exit(1);
@@ -50,9 +52,10 @@ else if (mode === 'build:web') {
   mkdirSync(path.join(project, 'dist-android'), { recursive: true });
   writeFileSync(path.join(project, 'dist-android/.gdignore'), '');
   if (!existsSync(path.join(project,'android/build/build.gradle'))) args.push('--install-android-build-template');
-  args.push('--headless', '--export-debug', 'Android', path.join(project, 'dist-android/rally-ludo.apk'));
+  const release = mode === 'build:android:release';
+  args.push('--headless', release ? '--export-release' : '--export-debug', 'Android', path.join(project, release ? 'dist-android/rally-ludo-release.apk' : 'dist-android/rally-ludo.apk'));
 } else if (mode !== 'run') {
-  console.error('Use run, editor, check, test, test:captures, test:perspective, test:computer, test:recovery, test:lives, test:leaving, build:web or build:android.');
+  console.error('Use run, editor, check, test, test:captures, test:perspective, test:computer, test:recovery, test:lives, test:leaving, build:web, build:android or build:android:release.');
   process.exit(1);
 }
 if (extra.length) args.push('--', ...extra);

@@ -18,6 +18,7 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 .tools/
+/private/android-signing/
 **/.godot/
 **/.gradle/
 **/.kotlin/

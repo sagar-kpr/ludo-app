@@ -391,6 +391,28 @@ Rebuild after changing it. Never deploy `ws://localhost` or a private LAN URL.
 
 ## Android APK
 
+Build a signed release APK for sharing with Android users:
+
+```sh
+npm run godot:build:android:release
+```
+
+Output: `apps/godot/dist-android/rally-ludo-release.apk`. This keeps the existing
+package ID and builds the release camera/audio plugin. The first run generates a
+release signing key and password file in `private/android-signing/` at the
+repository root. Later builds reuse that key. This folder is ignored by Git and
+its files have owner-only permissions. Back up the entire folder privately;
+future updates must use the same key. Never share it with the APK or commit it.
+For an externally managed key, set all three variables:
+`GODOT_ANDROID_KEYSTORE_RELEASE_PATH`, `GODOT_ANDROID_KEYSTORE_RELEASE_USER`
+(key alias), and `GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD`.
+
+If the debug APK is already installed, uninstall it once before installing the
+release APK because their signing keys differ. This can clear locally saved
+profile preferences. Subsequent releases signed with this release key can update
+the installed release app. The current preset targets ARM64, Android 7.0+.
+Physical phone installation, gameplay and camera/audio still require device QA.
+
 The Android debug APK can be exported with JDK 17, Android SDK 35 and the
 matching Godot templates. The local validation build uses an isolated toolchain
 under `.tools`; configure SDK/JDK paths in Godot Editor Settings on other machines.
