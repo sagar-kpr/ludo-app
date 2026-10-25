@@ -830,6 +830,8 @@ func build_dialogs() -> void:
 	avatar_scroll.custom_minimum_size = Vector2(260,210)
 	avatar_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	avatar_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	avatar_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	avatar_scroll.scroll_deadzone = 8
 	avatar_column.add_child(avatar_scroll)
 	avatar_grid = GridContainer.new()
 	avatar_grid.columns = 3
@@ -1014,7 +1016,8 @@ func build_sticker_picker() -> void:
 	sticker_scroll = ScrollContainer.new()
 	sticker_scroll.follow_focus = true
 	sticker_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	sticker_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	sticker_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	sticker_scroll.scroll_deadzone = 8
 	column.add_child(sticker_scroll)
 	sticker_grid = GridContainer.new()
 	sticker_grid.columns = 4
@@ -1025,6 +1028,8 @@ func build_sticker_picker() -> void:
 		var choice := Button.new()
 		choice.text = StickerArt.caption(sticker)
 		choice.tooltip_text = "Send " + sticker.to_lower()
+		# Let drag events reach the scroll container; it cancels the tap on swipe.
+		choice.mouse_filter = Control.MOUSE_FILTER_PASS
 		choice.custom_minimum_size = Vector2(56,64)
 		choice.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		choice.add_theme_font_size_override("font_size",10)
@@ -1193,6 +1198,7 @@ func open_avatar_picker() -> void:
 		child.queue_free()
 	for id in AvatarCatalog.names():
 		var choice := button("",func(): select_avatar(id))
+		choice.mouse_filter = Control.MOUSE_FILTER_PASS
 		choice.custom_minimum_size = Vector2(76,84)
 		choice.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		choice.icon = AvatarCatalog.texture_for(id)
