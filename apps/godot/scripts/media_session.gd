@@ -18,7 +18,8 @@ var last_error := ""
 var native_probe_elapsed := 0.0
 var waiting_for_native := false
 var native_status_connected := false
-var native_discovery_logged := false
+var native_missing_logged := false
+var native_discovered_logged := false
 var native_api_error_logged := false
 
 func _ready() -> void:
@@ -29,9 +30,9 @@ func _ready() -> void:
 
 func _resolve_native() -> bool:
 	if web_ready or not Engine.has_singleton("RallyMedia"):
-		if OS.has_feature("android") and not native_discovery_logged:
+		if OS.has_feature("android") and not native_missing_logged:
 			push_warning("RallyMedia Android singleton is not available yet; discovery will retry.")
-			native_discovery_logged = true
+			native_missing_logged = true
 		native = null
 		return false
 	var candidate = Engine.get_singleton("RallyMedia")
@@ -53,9 +54,9 @@ func _resolve_native() -> bool:
 	if not native_status_connected:
 		candidate.connect("media_status",_on_status)
 		native_status_connected = true
-	if not native_discovery_logged:
+	if not native_discovered_logged:
 		print("RallyMedia Android singleton discovered; required methods and media_status signal are available.")
-		native_discovery_logged = true
+		native_discovered_logged = true
 	return true
 
 func join(code: String, player_id: String) -> void:
