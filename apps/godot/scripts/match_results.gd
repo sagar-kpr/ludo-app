@@ -7,7 +7,7 @@ const Celebration = preload("res://scripts/win_celebration.gd")
 const HOME := preload("res://scripts/board_math.gd").HOME
 var entrance: Tween
 
-func populate(state: Dictionary) -> void:
+func populate(state: Dictionary, palette: Dictionary = {}) -> void:
 	if entrance:
 		entrance.kill()
 	modulate = Color.WHITE
@@ -43,7 +43,7 @@ func populate(state: Dictionary) -> void:
 			var avatar := Avatar.new()
 			row.add_child(avatar)
 			avatar.custom_minimum_size = Vector2(40,40)
-			avatar.configure(Design.COLORS.get(player.get("color",""),Design.FOREST),str(player.get("name","")).hash(),true)
+			avatar.configure(palette.get(player.get("color",""),Design.COLORS.get(player.get("color",""),Design.FOREST)),str(player.get("name","")).hash(),true)
 			avatar.computer = bool(player.get("isComputer",false))
 			avatar.set_portrait(null if avatar.computer else AvatarCatalog.texture_for(str(player.get("avatarId",""))))
 			var details := VBoxContainer.new()

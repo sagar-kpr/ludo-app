@@ -63,10 +63,10 @@ func run() -> void:
 	preview.begin_roll_preview()
 	preview.cancel_roll_preview()
 	check(not preview.rolling and preview.settled_value == 6 and preview.die.rotation.is_equal_approx(preview.FACE_ROTATIONS[6]),"Failed roll restores the previous face and stops the preview")
-	var actor_steps: Array[Vector3] = []
-	var observer_steps: Array[Vector3] = []
-	actor.board.step_landed.connect(func(id: String): actor_steps.append(actor.board.pawns[id].position))
-	observer.board.step_landed.connect(func(id: String): observer_steps.append(observer.board.pawns[id].position))
+	var actor_steps: Array[int] = []
+	var observer_steps: Array[int] = []
+	actor.board.step_landed.connect(func(id: String): actor_steps.append(int(actor.board.display_positions[id])))
+	observer.board.step_landed.connect(func(id: String): observer_steps.append(int(observer.board.display_positions[id])))
 	for client in clients:
 		client._receive(state_event(fixture(1, 1)))
 		client._receive({"type": "DICE_ROLLED", "playerId": "a", "color": "coral", "value": 3, "version": 2})
@@ -78,7 +78,7 @@ func run() -> void:
 	check(actor.events.any(func(event): return event.type == "TOKEN_MOVED"), "Focus resync preserves the pending move")
 	await wait_idle(clients)
 	check(actor_steps.size() == 3 and observer_steps.size() == 3, "Actor and observer both show all three landing steps")
-	check(actor_steps == observer_steps, "Both screens visit the same per-cell positions")
+	check(actor_steps == observer_steps, "Both perspectives visit the same logical path positions")
 	check(actor.game == observer.game and actor.game.version == 3, "Presentation fix preserves authoritative state")
 	check(not actor.presenting and not actor.awaiting_move_state, "Resync releases the presentation lock after applying state")
 	# A legal local tap starts one visual hop without waiting for a round trip.

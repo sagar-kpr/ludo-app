@@ -223,6 +223,17 @@ func configure(id: String, color: Color) -> void:
 	area.add_child(collision)
 	visual.add_child(area)
 
+func set_display_color(color: Color) -> void:
+	if token_color == color:
+		return
+	token_color = color
+	visual.get_node("PinDome").material_override.set_shader_parameter("tint", color)
+	glow_floor.material_override.set_shader_parameter("tint", color)
+	for stud in ring.get_children():
+		if stud is MeshInstance3D:
+			stud.material_override.albedo_color = color
+			stud.material_override.emission = color
+
 func part(mesh: Mesh, at: Vector3, mat: Material) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh

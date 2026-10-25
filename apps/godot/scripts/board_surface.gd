@@ -17,6 +17,18 @@ func _ready() -> void:
 	theme = Tokens
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	size = Vector2(RESOLUTION, RESOLUTION)
+	_build_palette()
+
+func set_palette(palette: Dictionary) -> void:
+	if colors == palette:
+		return
+	colors = palette.duplicate()
+	_build_palette()
+
+func _build_palette() -> void:
+	yard_gradients.clear()
+	yard_trims.clear()
+	cell_gradients.clear()
 	for key in BoardMath.COLORS:
 		var color: Color = colors[key]
 		var gradient := Gradient.new()
@@ -37,7 +49,7 @@ func _ready() -> void:
 		trim.set_corner_radius_all(20)
 		yard_trims.append(trim)
 	# Restrained gradients read as matte card stock, with one shared light direction.
-	for color in [Tokens.cell_white, Tokens.red, Tokens.green, Tokens.blue, Tokens.yellow]:
+	for color in [Tokens.cell_white] + colors.values():
 		var gradient := Gradient.new()
 		gradient.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
 		var shade: Color = color.darkened(0.07 if color != Tokens.cell_white else 0.035)

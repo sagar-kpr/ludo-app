@@ -63,7 +63,7 @@ func run() -> void:
 	var now := int(Time.get_unix_time_from_system()*1000)
 	var snapshot := {"type":"STATE","roomCode":"CAPTURE","state":after,"serverTime":now,"turnDeadline":now+30000+240+42*Board.CAPTURE_STEP_MS+Board.CAPTURE_HOME_MS,"turnDurationMs":30000}
 	# Actor missed the move event, observer received it normally. Both must
-	# visit the identical reverse path instead of jumping to the yard.
+	# visit the same logical reverse path in their own visual perspective.
 	var recovery := snapshot.duplicate(true)
 	recovery.recovered = true
 	actor._receive(recovery)
@@ -79,9 +79,11 @@ func run() -> void:
 	check(clients.all(func(client): return not client.processing_events),"Capture queues finish on both screens")
 	check(capture_sounds == [1,1] and reverse_step_sounds.is_empty(),"Normal and recovered captures play one cut cue and no reverse footstep cues")
 	var expected: Array = []
-	for position in range(42,-1,-1):
-		expected.append(BoardMath.world("mint",position,2))
-	check(paths[0] == expected and paths[1] == expected,"Normal and recovered captures retrace all 42 track cells, then the original yard slot")
+	for slot in range(2):
+		expected.clear()
+		for position in range(42,-1,-1):
+			expected.append(clients[slot].board.world_position("mint",position,2))
+		check(paths[slot] == expected,"Normal and recovered captures retrace every cell in their own perspective")
 	for client in clients:
 		check(client.board.display_positions["b-2"] == 0,"Capture reaches the authoritative base position")
 		check(client.game == after and not client.presenting,"Capture finishes before applying the next-turn snapshot")

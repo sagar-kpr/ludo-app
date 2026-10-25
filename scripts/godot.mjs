@@ -29,6 +29,7 @@ else if (mode === 'check') {
   process.exit(0);
 }
 else if (mode === 'test:captures') args.push('--headless', '--script', 'res://tests/captures.gd');
+else if (mode === 'test:perspective') args.push('--headless', '--script', 'res://tests/perspective.gd');
 else if (mode === 'test:computer') args.push('--headless', '--script', 'res://tests/computer.gd');
 else if (mode === 'test:recovery') args.push('--headless', '--script', 'res://tests/recovery.gd');
 else if (mode === 'test:lives') args.push('--headless', '--script', 'res://tests/timeout_lives.gd');
@@ -51,7 +52,7 @@ else if (mode === 'build:web') {
   if (!existsSync(path.join(project,'android/build/build.gradle'))) args.push('--install-android-build-template');
   args.push('--headless', '--export-debug', 'Android', path.join(project, 'dist-android/rally-ludo.apk'));
 } else if (mode !== 'run') {
-  console.error('Use run, editor, check, test, test:captures, test:computer, test:recovery, test:lives, test:leaving, build:web or build:android.');
+  console.error('Use run, editor, check, test, test:captures, test:perspective, test:computer, test:recovery, test:lives, test:leaving, build:web or build:android.');
   process.exit(1);
 }
 if (extra.length) args.push('--', ...extra);

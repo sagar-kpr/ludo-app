@@ -48,14 +48,21 @@ try {
   const errors=[];
   for(const page of [host,friend]) {
     page.on('pageerror',error=>errors.push(error.message));
-    // Background game tabs may suspend requestAnimationFrame; poll network/media
-    // assertions with timers so a received packet does not wait for a paint.
-    const wait=page.waitForFunction.bind(page);
-    page.waitForFunction=(fn,arg,options={})=>wait(fn,arg,{polling:100,timeout:45000,...options});
+    // Poll from Node: software-rendered background tabs can suspend their own
+    // timers even after receiving the relevant WebSocket/WebRTC events.
+    page.waitForFunction=async(fn,arg,options={})=>{
+      const deadline=Date.now()+(options.timeout||60000);
+      while(Date.now()<deadline){
+        if(await page.evaluate(fn,arg))return;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      throw new Error('Media browser condition timed out');
+    };
   }
   const url=`http://127.0.0.1:${previewPort}`;
   // Software-rendered Godot clients load serially to avoid GPU contention.
   for(const page of [host,friend]) {
+    await page.bringToFront();
     await page.goto(url);
     await page.waitForFunction(()=>window.__events.some(event=>event.type==='CONNECTED'),null,{timeout:60000});
     await page.waitForFunction(()=>window.__rallyMedia);
@@ -88,6 +95,7 @@ try {
   assert.equal(await host.evaluate(()=>window.__events.find(event=>event.type==='MEDIA_TOKEN').identity),hostId,'Media identity comes from the authenticated game session');
   assert.equal(await friend.evaluate(()=>window.__events.find(event=>event.type==='MEDIA_TOKEN').identity),friendId,'Each participant receives its own identity');
   async function tapCamera(page,id,compact) {
+    await page.bringToFront();
     const point=await page.evaluate(({id,compact})=>{
       const data=window.__videoLayout,slot=data.entries.find(entry=>entry.id===id);
       const canvas=document.querySelector('#canvas').getBoundingClientRect();

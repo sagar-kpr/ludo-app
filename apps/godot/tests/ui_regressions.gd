@@ -37,12 +37,12 @@ func run() -> void:
 		for frame in range(5):
 			await process_frame
 		check(not client.content.get_child(0).visible and not client.notice.visible,"Gameplay hides the header and footer")
-		var red: Rect2 = client.cards[0].get_global_rect()
-		var green: Rect2 = client.cards[1].get_global_rect()
-		var yellow: Rect2 = client.cards[2].get_global_rect()
-		var blue: Rect2 = client.cards[3].get_global_rect()
-		check(red.end.x <= green.position.x, "Red and green cards stay on opposite sides")
-		check(blue.end.x <= yellow.position.x, "Blue and yellow cards stay on opposite sides")
+		var red: Rect2 = client.card_at_corner(0).get_global_rect()
+		var green: Rect2 = client.card_at_corner(1).get_global_rect()
+		var yellow: Rect2 = client.card_at_corner(2).get_global_rect()
+		var blue: Rect2 = client.card_at_corner(3).get_global_rect()
+		check(red.end.x <= green.position.x, "Upper cards stay on opposite sides")
+		check(blue.end.x <= yellow.position.x, "Lower cards stay on opposite sides")
 		check(absf(red.position.x-blue.position.x) < 1 and absf(green.end.x-yellow.end.x) < 1, "Both rows align symmetrically")
 		check(red.position.y < blue.position.y, "Cards keep their matching board corners")
 		var board_rect: Rect2 = client.board.printed_rect()
@@ -70,7 +70,8 @@ func run() -> void:
 				var ink: Vector2 = client.board.artwork.ORIGIN+(Vector2(cell.y,cell.x)+Vector2.ONE*0.5)*client.board.artwork.CELL
 				var rendered: Vector2 = ink/Vector2(client.board.artwork_viewport.size)*client.board.board_plane.mesh.size-client.board.board_plane.mesh.size*0.5
 				var position: Vector3 = client.board.world_position(color,step,0)
-				check(rendered.is_equal_approx(Vector2(position.x,position.z)),"Square board cells align with every pawn destination")
+				var rotated: Vector3 = client.board.board_plane.to_global(Vector3(rendered.x,0,rendered.y))
+				check(Vector2(rotated.x,rotated.z).is_equal_approx(Vector2(position.x,position.z)),"Square board cells align with every pawn destination")
 		# Pointer coordinates follow the rebuilt board, including after rotations.
 		for seat in range(4):
 			var id := str(seat)+"-0"
@@ -97,7 +98,7 @@ func run() -> void:
 			check(is_equal_approx(card.lives.size.x,card.avatar.size.x),"Five dots span exactly the avatar width")
 			check(card.lives.global_position.y >= card.avatar.get_global_rect().end.y+4,"Life dots sit below the portrait")
 			check(is_equal_approx(card.lives.global_position.x,card.avatar.global_position.x),"Life dots align with the avatar")
-			check(card.lives.accent == client.Design.COLORS[client.BoardMath.COLORS[int(card.player_id)]],"Life dots use the player's board color")
+			check(card.lives.accent == client.perspective.display_color(client.BoardMath.COLORS[int(card.player_id)]),"Life dots use the player's board color")
 	# Simulate a phone with three physical pixels per UI pixel. Only the final
 	# render density changes; cell coordinates and pointer positions stay in UI space.
 	var before_density: Rect2 = client.board.printed_rect()
@@ -127,11 +128,11 @@ func run() -> void:
 	for seat in range(4):
 		check(client.cards[seat].lives.remaining == [3,1,5,0][seat],"Server balances update each player's dots independently")
 	# Missing seats must not collapse the other card into the wrong corner.
-	client.cards[0].hide()
+	client.card_at_corner(0).hide()
 	await process_frame
 	await process_frame
-	check(client.cards[1].get_global_rect().get_center().x > client.get_viewport_rect().get_center().x, "Green remains right aligned when red is absent")
-	client.cards[0].show()
+	check(client.card_at_corner(1).get_global_rect().get_center().x > client.get_viewport_rect().get_center().x, "Upper-right card stays aligned when upper-left is absent")
+	client.card_at_corner(0).show()
 	client.game.finishOrder = ["2"]
 	client.game.currentPlayer = "2"
 	client.turn_deadline_ticks = Time.get_ticks_msec() + 30000

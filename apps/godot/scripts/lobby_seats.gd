@@ -57,12 +57,12 @@ func _fit_portraits() -> void:
 		seat.card.custom_minimum_size = Vector2.ONE * card_width
 		seat.avatar.custom_minimum_size = Vector2.ONE * (card_width - 4.0)
 
-func apply_players(players: Array, self_id: String) -> void:
+func apply_players(players: Array, self_id: String, palette: Dictionary = {}) -> void:
 	for index in range(seats.size()):
 		var seat: Dictionary = seats[index]
 		var player: Dictionary = players[index] if index < players.size() else {}
 		var occupied := not player.is_empty()
-		var accent: Color = Design.COLORS.get(player.get("color", ""), Color("526984"))
+		var accent: Color = palette.get(player.get("color", ""), Design.COLORS.get(player.get("color", ""), Color("526984")))
 		var style := Design.surface(Color("11233b") if occupied else Color("0d1b2e"), 14, accent.darkened(0.3) if occupied else Color("30435c"))
 		style.set_border_width_all(1)
 		style.content_margin_left = 2

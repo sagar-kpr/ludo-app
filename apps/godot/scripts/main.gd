@@ -4,6 +4,13 @@ const Design = preload("res://scripts/design.gd")
 const Realtime = preload("res://scripts/realtime.gd")
 const Board = preload("res://scripts/board.gd")
 const BoardMath = preload("res://scripts/board_math.gd")
+const BoardPerspective = preload("res://scripts/board_perspective.gd")
+const PawnColorChoice = preload("res://scripts/pawn_color_choice.gd")
+var perspective = BoardPerspective.new()
+var preferred_color := "coral"
+var color_choices: Array[Button] = []
+var color_caption: Label
+var layout_signature := ""
 const PlayerCard = preload("res://scripts/player_card.gd")
 const GameBackground = preload("res://scripts/game_background.gd")
 const Feedback = preload("res://scripts/feedback.gd")
@@ -192,6 +199,9 @@ func configure_web_field(input: LineEdit) -> void:
 func _ready() -> void:
 	theme = Design.make_theme()
 	config.load("user://preferences.cfg")
+	preferred_color = str(config.get_value("player","preferred_color","coral"))
+	if preferred_color not in BoardMath.COLORS:
+		preferred_color = "coral"
 	selected_avatar = str(config.get_value("player","avatar",""))
 	reduced_motion = bool(config.get_value("accessibility", "reduced_motion", false))
 	endpoint = str(ProjectSettings.get_setting("rally/realtime_url"))
@@ -309,18 +319,22 @@ func _safe_area() -> void:
 		content.custom_minimum_size.x = minf(600.0,available.x-24.0)
 
 func set_game_layout(landscape: bool) -> void:
-	if using_landscape == landscape:
+	var next_signature := str(landscape) + ":" + str(perspective.turns)
+	if layout_signature == next_signature:
 		return
+	layout_signature = next_signature
 	using_landscape = landscape
 	if landscape:
 		for row in player_rows:
 			row.hide()
 		for seat in [0,3]:
-			cards[seat].reparent(left_profiles)
-		left_profiles.move_child(cards[0],0)
+			card_at_corner(seat).reparent(left_profiles)
+		left_profiles.move_child(card_at_corner(0),0)
+		left_profiles.move_child(card_at_corner(3),left_profiles.get_child_count()-1)
 		for seat in [1,2]:
-			cards[seat].reparent(right_profiles)
-		right_profiles.move_child(cards[1],0)
+			card_at_corner(seat).reparent(right_profiles)
+		right_profiles.move_child(card_at_corner(1),0)
+		right_profiles.move_child(card_at_corner(2),right_profiles.get_child_count()-1)
 		board_holder.reparent(landscape_view)
 		landscape_view.move_child(board_holder,1)
 		landscape_view.show()
@@ -329,8 +343,9 @@ func set_game_layout(landscape: bool) -> void:
 		for pair in range(2):
 			var seats := [0,1] if pair == 0 else [3,2]
 			for seat in seats:
-				cards[seat].reparent(player_rows[pair])
-			player_rows[pair].move_child(cards[seats[0]],0)
+				card_at_corner(seat).reparent(player_rows[pair])
+			player_rows[pair].move_child(card_at_corner(seats[0]),0)
+			player_rows[pair].move_child(card_at_corner(seats[1]),player_rows[pair].get_child_count()-1)
 			player_rows[pair].show()
 		board_holder.reparent(game_view)
 		game_view.move_child(board_holder,1)
@@ -549,6 +564,21 @@ func build_ui() -> void:
 	name_input.add_theme_stylebox_override("normal",Design.surface(Color("15253f"),14,Color("344864")))
 	identity_fields.add_child(name_input)
 	identity_fields.add_child(label("For Friends and Bot",12,Color("b9cde2")))
+	color_caption = label("",12,Design.MUTED)
+	identity_fields.add_child(color_caption)
+	var color_row := HBoxContainer.new()
+	color_row.add_theme_constant_override("separation",6)
+	identity_fields.add_child(color_row)
+	var color_atlas := PawnColorChoice.make_atlas(color_row)
+	for key in ["coral","sun","violet","mint"]:
+		var choice := PawnColorChoice.new()
+		choice.color_key = key
+		choice.preview = color_atlas
+		choice.set_meta("color",key)
+		choice.pressed.connect(func(): select_pawn_color(key))
+		color_row.add_child(choice)
+		color_choices.append(choice)
+	update_color_choices()
 	var modes := HBoxContainer.new()
 	modes.add_theme_constant_override("separation",14)
 	dashboard.add_child(modes)
@@ -1192,6 +1222,26 @@ func open_avatar_picker() -> void:
 	avatar_picker.position = (Vector2i(get_viewport_rect().size)-picker_size)/2
 	sync_web_form()
 
+func card_at_corner(corner: int):
+	return cards[perspective.logical_seat(corner)]
+
+func update_color_choices() -> void:
+	color_caption.text = "Choose your pawn"
+	for choice in color_choices:
+		var key: String = choice.get_meta("color")
+		choice.selected = key == preferred_color
+
+func select_pawn_color(key: String) -> void:
+	if key not in BoardMath.COLORS or game.get("phase","") not in ["","lobby"]:
+		return
+	preferred_color = key
+	config.set_value("player","preferred_color",key)
+	config.save("user://preferences.cfg")
+	update_color_choices()
+	if not game.is_empty():
+		show_state()
+		refresh_controls()
+
 func select_avatar(id: String) -> void:
 	selected_avatar = id
 	config.set_value("player","avatar",id)
@@ -1435,6 +1485,9 @@ func receive_chat(event: Dictionary) -> void:
 					card.chat.unread = true
 
 func show_state() -> void:
+	# All consumers share this one local adapter; authoritative dictionaries stay intact.
+	perspective = BoardPerspective.for_player(game.get("players",[]) + game.get("departedPlayers",[]),self_id,preferred_color)
+	board.set_perspective(perspective)
 	var friend_call: bool = game.get("phase","") in ["rolling","moving"] and not game.get("players",[]).any(func(player: Dictionary): return bool(player.get("isComputer",false)))
 	if friend_call and online:
 		call_media.join(room_code,self_id)
@@ -1450,7 +1503,7 @@ func show_state() -> void:
 	brand_label.add_theme_color_override("font_color",Color("f3f7ff") if not is_lobby else Design.INK)
 	notice.add_theme_color_override("font_color",Color("c2d6ef") if not is_lobby else Design.MUTED)
 	var players: Array = game.get("players",[])
-	lobby_players.apply_players(players,self_id)
+	lobby_players.apply_players(players,self_id,perspective.palette())
 	board.apply_state(game,self_id)
 	if game.get("phase") == "finished":
 		# Keep the final ranking intact while each player dismisses independently.
@@ -1470,7 +1523,7 @@ func show_state() -> void:
 					lines.append("%s  %s · %d/4 home" % [["1st","2nd","3rd","4th"][rank],str(player.name),home_count])
 		result_stats.text = "\n\n".join(lines)
 		if first_result:
-			result_list.populate(result_state)
+			result_list.populate(result_state,perspective.palette())
 		result_stats.hide()
 		if not result.visible:
 			chat_dialog.hide()
@@ -1535,7 +1588,7 @@ func refresh_controls() -> void:
 		var rank: int = game.get("finishOrder",[]).find(player.get("id",""))
 		var active: bool = rank < 0 and not player.is_empty() and player.id == game.get("currentPlayer") and game.get("phase") in ["rolling","moving"]
 		var own: bool = not player.is_empty() and player.id == self_id
-		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own)
+		cards[seat].update_player(player, active, active and own and can_act and game.get("phase") == "rolling", own, perspective.display_color(BoardMath.COLORS[seat]))
 		if computer_match:
 			cards[seat].chat.hide()
 			cards[seat].camera_button.hide()

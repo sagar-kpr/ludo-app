@@ -11,6 +11,8 @@
     "godot:test": "node scripts/test-godot.mjs",
     "godot:test:leaving": "node scripts/test-godot.mjs leaving",
     "godot:test:captures": "node scripts/godot.mjs test:captures",
+    "godot:test:perspective": "node scripts/godot.mjs test:perspective",
+    "godot:test:perspective:browser": "npm run godot:build:web && node scripts/test-godot-perspective-browser.mjs",
     "godot:test:computer": "node scripts/test-godot.mjs computer",
     "godot:test:recovery": "node scripts/test-godot.mjs recovery",
     "godot:test:computer:browser": "npm run godot:build:web && node scripts/test-godot-computer-browser.mjs",

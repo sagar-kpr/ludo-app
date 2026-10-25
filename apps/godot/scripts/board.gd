@@ -10,7 +10,10 @@ const BoardMath = preload("res://scripts/board_math.gd")
 const Pawn = preload("res://scripts/pawn.gd")
 const Geometry = preload("res://scripts/geometry.gd")
 const BoardSurface = preload("res://scripts/board_surface.gd")
+const Perspective = preload("res://scripts/board_perspective.gd")
 static var BOARD_COLORS: Dictionary = Design.COLORS
+var perspective = Perspective.new()
+var display_colors: Dictionary = Design.COLORS.duplicate()
 var viewport: SubViewport
 var world: Node3D
 var camera: Camera3D
@@ -131,7 +134,23 @@ func _has_point(point: Vector2) -> bool:
 	return camera != null and (printed_rect().has_point(point) or (enabled and not token_at_screen(point).is_empty()))
 
 func world_position(color: String, position: int, index: int) -> Vector3:
-	return BoardMath.world(color,position,index)
+	return perspective.world(BoardMath.world(color,position,index))
+
+func set_perspective(view) -> void:
+	if perspective.signature() == view.signature():
+		return
+	cancel_move_preview()
+	perspective = view
+	display_colors = view.palette()
+	board_plane.rotation.y = -view.turns * PI / 2.0
+	artwork.set_palette(display_colors)
+	artwork_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	for labels in [rank_labels, departure_labels]:
+		for badge in labels.values():
+			badge.queue_free()
+		labels.clear()
+	for mark in trails.duplicate():
+		clear_trail(mark)
 
 func _fit_camera() -> void:
 	if camera and size.x > 0 and size.y > 0:
@@ -199,9 +218,10 @@ func apply_state(state: Dictionary, self_id: String, highlight_color: String = "
 		if not pawns.has(id):
 			var pawn := Pawn.new()
 			world.add_child(pawn)
-			pawn.configure(id, BOARD_COLORS[token.color])
+			pawn.configure(id, display_colors[token.color])
 			pawns[id] = pawn
 		var pawn: Node3D = pawns[id]
+		pawn.set_display_color(display_colors[token.color])
 		pawn.reduced_motion = reduced_motion
 		pawn.position = world_position(str(token.color), int(token.position), index)
 		var completed := int(token.position) >= BoardMath.HOME
@@ -301,7 +321,7 @@ func show_ranks(state: Dictionary) -> void:
 		var center := world_position(str(player.color),0,0).lerp(world_position(str(player.color),0,3),0.5)
 		# A crown-and-rank badge stays on the winner's home dock, matching the
 		# celebratory board treatment instead of only showing the results dialog.
-		var badge := make_badge("♛\n"+["1st","2nd","","4th"][rank],BOARD_COLORS[player.color],center+Vector3(0,0.72,0.75))
+		var badge := make_badge("♛\n"+["1st","2nd","","4th"][rank],display_colors[player.color],center+Vector3(0,0.72,0.75))
 		badge.font_size = 58
 		badge.pixel_size = 0.009
 		rank_labels[player.id] = badge
@@ -432,13 +452,13 @@ func animate_move(event: Dictionary) -> void:
 	layout_stacks(id)
 	pawns[id].scale = Vector3.ONE
 	if consumed == 0:
-		leave_trail(pawns[id].position,BOARD_COLORS[token.color])
+		leave_trail(pawns[id].position,display_colors[token.color])
 	for step in range(consumed,steps):
 		var landing := finish if start == 0 else start + step + 1
 		var destination := world_position(str(token.color), landing, index)
 		await pawns[id].hop_to(destination, maxf(0.24,duration / maxf(steps, 1)), reduced_motion)
 		if step < steps-1:
-			leave_trail(destination,BOARD_COLORS[token.color])
+			leave_trail(destination,display_colors[token.color])
 		display_positions[id] = landing
 		step_landed.emit(id)
 	display_positions[id] = finish

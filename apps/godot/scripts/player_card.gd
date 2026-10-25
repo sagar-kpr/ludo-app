@@ -230,12 +230,12 @@ func fit_width(available_width: float, viewport_height: float = 860.0, mobile_po
 		style.content_margin_top = 6 if compact_height else 8
 		style.content_margin_bottom = 6 if compact_height else 8
 
-func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool) -> void:
+func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool, display_accent: Color = Color.TRANSPARENT) -> void:
 	departed = bool(player.get("departed",false))
 	player_id = str(player.get("id", ""))
 	turn_own = own
 	name_label.text = "Bot" if player.get("isComputer",false) else str(player.get("name","Open seat"))
-	var accent: Color = Design.COLORS.get(player.get("color",""),Color("789484"))
+	var accent: Color = display_accent if display_accent.a > 0 else Design.COLORS.get(player.get("color",""),Color("789484"))
 	avatar.configure(accent,str(player.get("name","")).hash(),not player.is_empty())
 	avatar.computer = bool(player.get("isComputer",false))
 	avatar.set_portrait(AvatarCatalog.texture_for(str(player.get("avatarId",""))) if not player.is_empty() and not avatar.computer else null)
