@@ -241,12 +241,12 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool, 
 	avatar.set_portrait(AvatarCatalog.texture_for(str(player.get("avatarId",""))) if not player.is_empty() and not avatar.computer else null)
 	panel.timer_color = accent
 	lives.accent = accent
-	lives.visible = not player.is_empty()
+	lives.visible = not player.is_empty() and not avatar.computer
 	var style := Design.surface(Color("14263f"),16)
 	style.set_border_width_all(1)
-	style.border_color = Color(accent,0.20) if active and not departed else Color("2a4059")
-	style.shadow_color = Color(accent,0.08) if active and not departed else Color(0.015,0.025,0.06,0.25)
-	style.shadow_size = 5 if active and not departed else 3
+	style.border_color = Color("2a4059")
+	style.shadow_color = Color(0.015,0.025,0.06,0.25)
+	style.shadow_size = 3
 	style.content_margin_left = 8
 	style.content_margin_right = 8
 	style.content_margin_top = 6 if compact_height else 8

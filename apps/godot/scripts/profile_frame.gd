@@ -24,11 +24,17 @@ func _draw() -> void:
 	for index in range(points.size()-1):
 		length += points[index].distance_to(points[index+1])
 	draw_polyline(points,Color(timer_color,0.10),1.0,true)
-	var ink := Color(timer_color.lightened(0.12),0.55)
 	var remaining := length*clampf(timer_fraction,0,1)
+	var timer_path := PackedVector2Array([points[0]])
 	for index in range(points.size()-1):
 		var segment := points[index].distance_to(points[index+1])
 		if remaining <= 0:
 			break
-		draw_line(points[index],points[index].lerp(points[index+1],minf(1,remaining/maxf(segment,0.001))),ink,1.0,true)
+		timer_path.append(points[index].lerp(points[index+1],minf(1,remaining/maxf(segment,0.001))))
 		remaining -= segment
+	if timer_path.size() > 1:
+		# All glow layers follow only the remaining countdown path.
+		draw_polyline(timer_path,Color(timer_color,0.06),12.0,true)
+		draw_polyline(timer_path,Color(timer_color,0.12),8.0,true)
+		draw_polyline(timer_path,Color(timer_color,0.28),5.0,true)
+		draw_polyline(timer_path,Color(timer_color.lightened(0.12),0.95),2.5,true)
