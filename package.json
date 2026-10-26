@@ -43,6 +43,7 @@
     "godot:templates:android": "node scripts/install-godot-web-templates.mjs --android",
     "godot:media:android": "node scripts/build-godot-media.mjs",
     "godot:test:media": "npm run godot:build:web && node scripts/test-godot-media-browser.mjs",
+    "godot:test:media:native": "node scripts/godot.mjs test:media:native",
     "server:check": "tsc -p apps/game-server/tsconfig.json"
   },
   "dependencies": {

@@ -221,6 +221,8 @@ func _ready() -> void:
 		card.chat_pressed.connect(open_table_chat)
 		card.leave_pressed.connect(open_leave_confirmation)
 		card.camera_pressed.connect(toggle_call)
+		card.microphone_pressed.connect(toggle_microphone)
+		card.speaker_pressed.connect(toggle_player_audio)
 		card.dice.roll_contact.connect(func(settled: bool, strength: float):
 			feedback.cue("dice_settle" if settled else "dice",card.player_id == self_id,strength)
 		)
@@ -926,7 +928,7 @@ func build_dialogs() -> void:
 			settings.add_child(sound_row)
 		else:
 			settings.add_child(toggle)
-	media_status = label("Tap your camera icon in an online friend game to turn camera and microphone on or off.", 13, Design.MUTED)
+	media_status = label("Start a call with your camera icon. Use microphone and speaker buttons to control audio.", 13, Design.MUTED)
 	settings.add_child(media_status)
 	settings.add_child(button("Retry server connection", func():
 		if room_code.is_empty():
@@ -1318,13 +1320,36 @@ func toggle_call() -> void:
 	call_media.join(room_code,self_id)
 	call_media.toggle()
 
+func toggle_microphone() -> void:
+	if not online or recovering_match or room_code.is_empty() or game.get("phase","") not in ["rolling","moving"] or game.get("players",[]).any(func(player: Dictionary): return bool(player.get("isComputer",false))):
+		return
+	call_media.join(room_code,self_id)
+	call_media.toggle_microphone()
+
+func toggle_player_audio(player_id: String) -> void:
+	if player_id.is_empty() or player_id == self_id or room_code.is_empty() or not game_view.visible:
+		return
+	call_media.set_player_muted(player_id,not call_media.is_player_muted(player_id))
+	update_video_layout()
+
 func update_video_layout() -> void:
 	var entries: Array = []
+	var friends_call: bool = not game.get("players",[]).any(func(player: Dictionary): return bool(player.get("isComputer",false)))
 	for card in cards:
+		card.call_controls_open = call_media.controls_open and friends_call
+		card.remote_audio_available = friends_call and call_media.has_player_audio(card.player_id)
+		card.microphone_button.visible = card.call_controls_open and card.chat.visible
+		card.speaker_button.visible = card.remote_audio_available and card.gift.visible
 		if card.is_visible_in_tree() and not card.player_id.is_empty():
 			var rect: Rect2 = card.avatar.get_global_rect()
 			entries.append({"id":card.player_id,"rect":[rect.position.x,rect.position.y,rect.size.x,rect.size.y]})
-		card.camera_button.active = card.player_id == self_id and call_media.publishing
+		var own: bool = card.player_id == self_id
+		card.camera_button.active = own and call_media.camera_enabled
+		card.microphone_button.active = own and call_media.microphone_enabled
+		card.camera_button.tooltip_text = "Start camera and voice" if not call_media.controls_open else "Turn camera off" if call_media.wanted_camera else "Turn camera on"
+		card.microphone_button.tooltip_text = "Mute my microphone" if call_media.wanted_microphone else "Unmute my microphone"
+		card.speaker_button.active = call_media.is_player_muted(card.player_id)
+		card.speaker_button.tooltip_text = ("Unmute " if card.speaker_button.active else "Mute ") + card.name_label.text + " for me"
 	var covered := reconnect_overlay.visible or loading_overlay.visible
 	for dialog in [menu,chat_dialog,leave_dialog,sticker_picker,result,call_error]:
 		covered = covered or dialog.visible
@@ -1598,9 +1623,11 @@ func refresh_controls() -> void:
 		if computer_match:
 			cards[seat].chat.hide()
 			cards[seat].camera_button.hide()
-		cards[seat].camera_button.active = own and is_instance_valid(call_media) and call_media.publishing
-		cards[seat].camera_button.tooltip_text = "Turn camera and microphone off" if own and is_instance_valid(call_media) and call_media.wanted else "Turn camera and microphone on"
+			cards[seat].microphone_button.hide()
+			cards[seat].speaker_button.hide()
+		cards[seat].camera_button.active = own and is_instance_valid(call_media) and call_media.camera_enabled
 		cards[seat].camera_button.disabled = not online or recovering_match
+		cards[seat].microphone_button.disabled = not online or recovering_match
 		cards[seat].visible = not player.is_empty()
 		cards[seat].leave_button.disabled = not online or pending or presenting
 		cards[seat].set_lives(int(game.get("timeoutLives",{}).get(player.get("id",""),5)))

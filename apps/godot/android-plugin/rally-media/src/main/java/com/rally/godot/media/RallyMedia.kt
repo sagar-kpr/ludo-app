@@ -11,6 +11,8 @@ import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.track.LocalAudioTrackOptions
 import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.VideoPreset169
+import io.livekit.android.room.track.RemoteAudioTrack
+import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
 import io.livekit.android.room.participant.VideoTrackPublishDefaults
 import livekit.org.webrtc.RendererCommon
@@ -46,7 +48,11 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     private val transitions = Mutex()
     private var session: Session? = null
     private var permissionsPending = false
-    private var desiredPublishing = false
+    private var desiredCamera = false
+    private var desiredMicrophone = false
+    private var permissionRequest = emptyList<String>()
+    private val mutedParticipants = mutableSetOf<String>()
+    private val remoteAudio = mutableMapOf<String, MutableMap<RemoteAudioTrack, Boolean>>()
     private var publicationGeneration = 0
     private var videoLayer: FrameLayout? = null
     private var videoLayout = JSONObject()
@@ -143,36 +149,63 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
                     current.room.events.collect { event ->
                         if (session !== current) return@collect
                         when (event) {
+                            is RoomEvent.Connected -> status("connected", "Connected; microphone and camera off")
                             is RoomEvent.Reconnecting -> status("reconnecting", "Reconnecting")
                             is RoomEvent.Reconnected -> status("reconnected", "Connection restored")
                             is RoomEvent.Disconnected -> finishSession(
                                 current, "disconnected", "Room disconnected (${event.reason})",
                             )
-                            is RoomEvent.TrackSubscribed -> (event.track as? VideoTrack)?.let {
-                                attachVideo(current, event.participant.identity?.value.orEmpty(), it, false)
+                            is RoomEvent.TrackSubscribed -> {
+                                val identity = event.participant.identity?.value.orEmpty()
+                                (event.track as? VideoTrack)?.let { attachVideo(current, identity, it, false) }
+                                (event.track as? RemoteAudioTrack)?.let { track ->
+                                    track.setVolume(if (identity in mutedParticipants) 0.0 else 1.0)
+                                    remoteAudio.getOrPut(identity) { mutableMapOf() }[track] = event.publication.muted
+                                    reportRemoteAudio()
+                                }
                             }
                             is RoomEvent.TrackPublished -> if (event.participant == current.room.localParticipant) {
                                 (event.publication.track as? VideoTrack)?.let {
                                     attachVideo(current, event.participant.identity?.value.orEmpty(), it, true)
                                 }
                             }
-                            is RoomEvent.TrackUnsubscribed -> removeVideo(event.participant.identity?.value.orEmpty(), event.track as? VideoTrack)
+                            is RoomEvent.TrackUnsubscribed -> {
+                                val identity = event.participant.identity?.value.orEmpty()
+                                (event.track as? VideoTrack)?.let { removeVideo(identity, it) }
+                                (event.track as? RemoteAudioTrack)?.let {
+                                    remoteAudio[identity]?.remove(it)
+                                    reportRemoteAudio()
+                                }
+                            }
                             is RoomEvent.TrackUnpublished -> if (event.publication.kind == io.livekit.android.room.track.Track.Kind.VIDEO) {
                                 removeVideo(event.participant.identity?.value.orEmpty())
                             }
                             is RoomEvent.TrackMuted -> {
+                                (event.publication.track as? RemoteAudioTrack)?.let {
+                                    remoteAudio[event.participant.identity?.value.orEmpty()]?.set(it,true)
+                                    reportRemoteAudio()
+                                }
                                 if (event.publication.kind == io.livekit.android.room.track.Track.Kind.VIDEO) {
                                     videos[event.participant.identity?.value.orEmpty()]?.muted = true
                                     applyVideoLayout()
                                 }
                             }
                             is RoomEvent.TrackUnmuted -> {
+                                (event.publication.track as? RemoteAudioTrack)?.let {
+                                    remoteAudio[event.participant.identity?.value.orEmpty()]?.set(it,false)
+                                    reportRemoteAudio()
+                                }
                                 if (event.publication.kind == io.livekit.android.room.track.Track.Kind.VIDEO) {
                                     videos[event.participant.identity?.value.orEmpty()]?.muted = false
                                     applyVideoLayout()
                                 }
                             }
-                            is RoomEvent.ParticipantDisconnected -> removeVideo(event.participant.identity?.value.orEmpty())
+                            is RoomEvent.ParticipantDisconnected -> {
+                                val identity = event.participant.identity?.value.orEmpty()
+                                removeVideo(identity)
+                                remoteAudio.remove(identity)
+                                reportRemoteAudio()
+                            }
                             else -> Unit
                         }
                     }
@@ -180,9 +213,8 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
                 current.scope.launch {
                     try {
                         current.room.connect(url, token, ConnectOptions(audio = false, video = false))
-                        if (session === current) {
-                            status("connected", "Connected; microphone and camera off")
-                        }
+                        // connect() can finish signaling before the RTC transport
+                        // reaches CONNECTED. Publish only after RoomEvent.Connected.
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
@@ -197,45 +229,21 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
 
     @UsedByGodot
     fun set_microphone_enabled(enabled: Boolean) {
-        setMediaEnabled(enabled, Manifest.permission.RECORD_AUDIO, "microphone")
+        scope.launch { set_local_media(desiredCamera, enabled) }
     }
 
     @UsedByGodot
     fun set_camera_enabled(enabled: Boolean) {
-        setMediaEnabled(enabled, Manifest.permission.CAMERA, "camera")
+        scope.launch { set_local_media(enabled, desiredMicrophone) }
     }
 
-    private fun setMediaEnabled(enabled: Boolean, permission: String, kind: String) {
+    @UsedByGodot
+    fun set_participant_muted(identity: String, muted: Boolean) {
         scope.launch {
-            if (destroyed) return@launch
-            val current = session
-            if (current == null || current.room.state != Room.State.CONNECTED) {
-                status("error", "$kind requires a connected room")
-                return@launch
-            }
-            if (enabled && !hasPermission(permission)) {
-                status("permission_required", "$kind permission missing; call request_media_permissions")
-                return@launch
-            }
-            current.scope.launch {
-                current.mediaChanges.withLock {
-                    if (session !== current || current.room.state != Room.State.CONNECTED) return@withLock
-                    try {
-                        val changed = if (kind == "microphone") {
-                            current.room.localParticipant.setMicrophoneEnabled(enabled)
-                        } else {
-                            current.room.localParticipant.setCameraEnabled(enabled)
-                        }
-                        if (changed) {
-                            status("${kind}_${if (enabled) "enabled" else "disabled"}", "$kind ${if (enabled) "enabled" else "disabled"}")
-                        } else {
-                            status("error", "$kind change rejected by SDK")
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: Exception) {
-                        status("error", "$kind change failed (${error.javaClass.simpleName})")
-                    }
+            if (muted) mutedParticipants.add(identity) else mutedParticipants.remove(identity)
+            session?.room?.remoteParticipants?.values?.filter { it.identity?.value == identity }?.forEach { participant ->
+                participant.trackPublications.values.forEach { publication ->
+                    (publication.track as? RemoteAudioTrack)?.setVolume(if (muted) 0.0 else 1.0)
                 }
             }
         }
@@ -247,6 +255,7 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
             if (destroyed) return@launch
             transitions.withLock {
                 disposeSession()
+                mutedParticipants.clear()
                 status("disconnected", "Room disconnected")
             }
         }
@@ -265,7 +274,10 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
     }
 
     private suspend fun disposeSession() {
-        desiredPublishing = false
+        remoteAudio.clear()
+        reportRemoteAudio()
+        desiredCamera = false
+        desiredMicrophone = false
         publicationGeneration++
         for (identity in videos.keys.toList()) removeVideo(identity)
         val previous = session ?: return
@@ -278,61 +290,97 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
         }
     }
 
+    private fun reportRemoteAudio() {
+        val active = remoteAudio.filterValues { tracks -> tracks.values.any { !it } }.keys
+        status("remote_audio_state", org.json.JSONArray(active.toList()).toString())
+    }
+
     @UsedByGodot
-    fun set_publishing_enabled(enabled: Boolean) {
+    fun set_publishing_enabled(enabled: Boolean) = set_local_media(enabled, enabled)
+
+    @UsedByGodot
+    fun set_local_media(camera: Boolean, microphone: Boolean) {
         scope.launch {
             if (destroyed) return@launch
-            desiredPublishing = enabled
+            desiredCamera = camera
+            desiredMicrophone = microphone
             val generation = ++publicationGeneration
             val current = session
-            if (!enabled) {
-                if (current != null) stopPublishing(current)
-                status("publishing_disabled", "Camera and microphone off")
+            // Privacy controls stop unwanted devices even before a pending
+            // enable operation has completed. Generation checks discard it later.
+            if (current != null) {
+                if (!camera) stopKind(current, Track.Kind.VIDEO)
+                if (!microphone) stopKind(current, Track.Kind.AUDIO)
+            }
+            if (!camera && !microphone) {
+                reportLocalState(current)
                 return@launch
             }
-            if (current == null || current.room.state != Room.State.CONNECTED) {
-                desiredPublishing = false
+            if (current == null) {
                 status("error", "Camera and voice require a connected friend room")
                 return@launch
             }
-            if (!MEDIA_PERMISSIONS.all { hasPermission(it) }) {
-                request_media_permissions()
+            if (current.room.state != Room.State.CONNECTED) {
+                // Off switches above still release capture during a reconnect.
+                // Keep the latest target for the Reconnected event to reapply.
+                reportLocalState(current)
+                return@launch
+            }
+            val needed = buildList {
+                if (camera) add(Manifest.permission.CAMERA)
+                if (microphone) add(Manifest.permission.RECORD_AUDIO)
+            }
+            if (needed.any { !hasPermission(it) }) {
+                requestMediaPermissions(needed)
                 return@launch
             }
             current.scope.launch {
                 current.mediaChanges.withLock {
-                    if (session !== current || !desiredPublishing || generation != publicationGeneration) return@withLock
-                    try {
-                        val camera = current.room.localParticipant.setCameraEnabled(true)
-                        if (!desiredPublishing || generation != publicationGeneration) {
-                            stopPublishing(current)
-                            return@withLock
+                    if (session !== current || generation != publicationGeneration) return@withLock
+                    for ((kind, enabled) in listOf(Track.Kind.VIDEO to camera, Track.Kind.AUDIO to microphone)) {
+                        if (generation != publicationGeneration) break
+                        if (!enabled) continue
+                        try {
+                            val changed = if (kind == Track.Kind.VIDEO) current.room.localParticipant.setCameraEnabled(true)
+                                else current.room.localParticipant.setMicrophoneEnabled(true)
+                            if (!changed) throw IllegalStateException("Media unavailable")
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            if (generation == publicationGeneration) {
+                                stopKind(current, kind)
+                                if (kind == Track.Kind.VIDEO) desiredCamera = false else desiredMicrophone = false
+                                val device = if (kind == Track.Kind.VIDEO) "camera" else "microphone"
+                                status("${device}_error", "$device could not start. Check permissions and close other apps using it.")
+                            }
                         }
-                        val microphone = current.room.localParticipant.setMicrophoneEnabled(true)
-                        if (!camera || !microphone) throw IllegalStateException("Media unavailable")
-                        if (!desiredPublishing || generation != publicationGeneration) {
-                            stopPublishing(current)
-                            return@withLock
-                        }
-                        status("publishing_enabled", "Camera and microphone on. Tap again to turn both off.")
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        stopPublishing(current)
-                        desiredPublishing = false
-                        Log.e(TAG, "Camera or microphone publishing failed; check runtime permissions and device availability")
-                        status("error", "Camera or microphone could not start. Check permissions and close other camera apps.")
                     }
+                    if (session !== current) return@withLock
+                    if (!desiredCamera) stopKind(current, Track.Kind.VIDEO)
+                    if (!desiredMicrophone) stopKind(current, Track.Kind.AUDIO)
+                    if (generation == publicationGeneration) reportLocalState(current)
                 }
             }
         }
     }
 
-    private fun stopPublishing(current: Session) {
+    private fun stopKind(current: Session, kind: Track.Kind) {
         for (publication in current.room.localParticipant.trackPublications.values.toList()) {
-            publication.track?.let { current.room.localParticipant.unpublishTrack(it, stopOnUnpublish = true) }
+            if (publication.kind == kind) publication.track?.let {
+                current.room.localParticipant.unpublishTrack(it, stopOnUnpublish = true)
+            }
         }
-        removeVideo(current.room.localParticipant.identity?.value.orEmpty())
+        if (kind == Track.Kind.VIDEO) removeVideo(current.room.localParticipant.identity?.value.orEmpty())
+    }
+
+    private fun reportLocalState(current: Session?) {
+        val publications = current?.room?.localParticipant?.trackPublications?.values.orEmpty()
+        val camera = publications.any { it.kind == Track.Kind.VIDEO && it.track != null && !it.muted }
+        val microphone = publications.any { it.kind == Track.Kind.AUDIO && it.track != null && !it.muted }
+        status(if (camera) "camera_enabled" else "camera_disabled", if (camera) "Camera on" else "Camera off")
+        status(if (microphone) "microphone_enabled" else "microphone_disabled", if (microphone) "Microphone on" else "Microphone off")
+        if (camera && microphone) status("publishing_enabled", "Camera and microphone on")
+        if (!camera && !microphone) status("publishing_disabled", "Camera and microphone off")
     }
 
     @UsedByGodot
@@ -409,33 +457,23 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
 
     @UsedByGodot
     fun request_media_permissions() {
-        scope.launch {
-            if (destroyed) return@launch
-            val host = activity
-            if (host == null) {
-                status("error", "Android activity is unavailable")
-                return@launch
-            }
-            if (permissionsPending) {
-                status("permissions_pending", "Media permission request already pending")
-                return@launch
-            }
-            val missing = MEDIA_PERMISSIONS.filterNot { hasPermission(it) }
-            if (missing.isEmpty()) {
-                Log.i(TAG, "Camera and microphone permissions are already granted")
-                reportPermissions()
-            } else {
-                permissionsPending = true
-                Log.i(TAG, "Requesting Android media permissions: ${missing.joinToString()}")
-                status("permissions_requested", "Requesting microphone and camera permissions")
-                try {
-                    host.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST)
-                } catch (error: Exception) {
-                    permissionsPending = false
-                    Log.e(TAG, "Android media permission request failed (${error.javaClass.simpleName})")
-                    status("error", "Permission request failed (${error.javaClass.simpleName})")
-                }
-            }
+        scope.launch { requestMediaPermissions(MEDIA_PERMISSIONS) }
+    }
+
+    private fun requestMediaPermissions(permissions: List<String>) {
+        val host = activity
+        if (host == null) { status("error", "Android activity is unavailable"); return }
+        if (permissionsPending) return
+        val missing = permissions.filterNot { hasPermission(it) }
+        if (missing.isEmpty()) { status("permissions_granted", "Media permission granted"); return }
+        permissionsPending = true
+        permissionRequest = missing
+        status("permissions_requested", "Allow access to the camera or microphone you turn on")
+        try {
+            host.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST)
+        } catch (error: Exception) {
+            permissionsPending = false
+            status("error", "Permission request failed (${error.javaClass.simpleName})")
         }
     }
 
@@ -445,33 +483,21 @@ class RallyMedia(godot: Godot) : GodotPlugin(godot) {
         if (requestCode != PERMISSION_REQUEST) return
         scope.launch {
             permissionsPending = false
-            Log.i(TAG, "Media permission result received: ${permissions.mapIndexed { index, permission ->
-                "$permission=${grantResults.getOrNull(index) == PackageManager.PERMISSION_GRANTED}"
-            }.joinToString()}")
-            reportPermissions()
-            if (desiredPublishing && MEDIA_PERMISSIONS.all { hasPermission(it) }) set_publishing_enabled(true)
-            else if (desiredPublishing) {
-                desiredPublishing = false
-                session?.let { stopPublishing(it) }
+            if (desiredCamera && Manifest.permission.CAMERA in permissionRequest && !hasPermission(Manifest.permission.CAMERA)) {
+                desiredCamera = false
+                status("camera_error", "Allow camera access in Android Settings to show your video")
             }
+            if (desiredMicrophone && Manifest.permission.RECORD_AUDIO in permissionRequest && !hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                desiredMicrophone = false
+                status("microphone_error", "Allow microphone access in Android Settings to speak")
+            }
+            permissionRequest = emptyList()
+            if (!destroyed && session != null) set_local_media(desiredCamera, desiredMicrophone)
         }
     }
 
     private fun hasPermission(permission: String): Boolean =
         activity?.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
-
-    private fun reportPermissions() {
-        val microphone = hasPermission(Manifest.permission.RECORD_AUDIO)
-        val camera = hasPermission(Manifest.permission.CAMERA)
-        if (!microphone || !camera) {
-            Log.w(TAG, "Media permissions missing: microphone=$microphone, camera=$camera")
-        }
-        status(
-            if (microphone && camera) "permissions_granted" else "permissions_denied",
-            if (microphone && camera) "Camera and microphone permission granted."
-            else "Allow both camera and microphone permissions to join the call. You can also enable them in Android Settings.",
-        )
-    }
 
     override fun onMainDestroy() {
         Log.i(TAG, "Godot v2 RallyMedia plugin shutting down")

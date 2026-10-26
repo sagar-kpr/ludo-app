@@ -6,6 +6,8 @@ signal gift_pressed(target_player_id: String)
 signal chat_pressed
 signal leave_pressed
 signal camera_pressed
+signal microphone_pressed
+signal speaker_pressed(target_player_id: String)
 const Design = preload("res://scripts/design.gd")
 const Dice = preload("res://scripts/dice.gd")
 const Avatar = preload("res://scripts/avatar.gd")
@@ -21,6 +23,10 @@ var chat
 var leave_button
 var departed := false
 var camera_button
+var microphone_button
+var speaker_button
+var call_controls_open := false
+var remote_audio_available := false
 var name_label: Label
 var status_label: Label
 var avatar
@@ -156,6 +162,11 @@ func _ready() -> void:
 	camera_button.tooltip_text = "Camera and voice settings"
 	camera_button.pressed.connect(func(): camera_pressed.emit())
 	actions.add_child(camera_button)
+	microphone_button = ProfileAction.new()
+	microphone_button.kind = "microphone"
+	microphone_button.tooltip_text = "Turn microphone on"
+	microphone_button.pressed.connect(func(): microphone_pressed.emit())
+	actions.add_child(microphone_button)
 	leave_button = ProfileAction.new()
 	leave_button.kind = "leave"
 	leave_button.tooltip_text = "Leave game"
@@ -166,6 +177,11 @@ func _ready() -> void:
 	gift.tooltip_text = "Send an emoji or animated sticker"
 	gift.pressed.connect(func(): gift_pressed.emit(player_id))
 	actions.add_child(gift)
+	speaker_button = ProfileAction.new()
+	speaker_button.kind = "speaker"
+	speaker_button.tooltip_text = "Mute player for me"
+	speaker_button.pressed.connect(func(): speaker_pressed.emit(player_id))
+	actions.add_child(speaker_button)
 	# Keep timeout chances below the controls, clear of the active card frame.
 	var lives_margin := MarginContainer.new()
 	lives_margin.add_theme_constant_override("margin_left",8)
@@ -260,9 +276,12 @@ func update_player(player: Dictionary, active: bool, can_roll: bool, own: bool, 
 	invite.visible = player.is_empty()
 	chat.visible = own and not player.is_empty() and not departed
 	camera_button.visible = chat.visible
+	microphone_button.visible = chat.visible and call_controls_open
 	leave_button.visible = chat.visible
 	gift.visible = not player.is_empty() and not own and not departed and not computer
 	gift.disabled = player_id.is_empty() or own or computer
+	speaker_button.visible = gift.visible and remote_audio_available
+	speaker_button.disabled = gift.disabled
 	roll.disabled = not can_roll
 	if not player.is_empty():
 		for state in ["normal", "disabled", "hover", "pressed"]:

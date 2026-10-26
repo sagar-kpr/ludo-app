@@ -91,6 +91,7 @@ func run() -> void:
 	check(host.cards[2].gift.size.x == 32 and host.cards[2].gift.size.y == 24,"Emoji icon uses compact reference-style dimensions")
 	check(host.cards[0].chat.visible and host.cards[0].camera_button.visible and not host.cards[0].gift.visible,"Own profile shows only chat and camera, never a self-send emoji")
 	check(not host.cards[2].chat.visible and not host.cards[2].camera_button.visible and host.cards[2].gift.visible,"Opponent profile shows only an emoji icon")
+	check(not host.cards[0].microphone_button.visible and not host.cards[2].speaker_button.visible,"Extra call controls stay hidden before starting a call")
 	check(friend.cards[2].chat.visible and not friend.cards[0].chat.visible,"Each client sees controls only on their own profile")
 	check(not host.cards[1].gift.visible and not host.cards[1].chat.visible,"Open seats show no social icons")
 	check(host.cards[0].actions.global_position.y >= host.cards[0].panel.get_global_rect().end.y,"Social icons sit below the rounded profile panel")

@@ -46,6 +46,22 @@ func _draw() -> void:
 				ink = Color("75eabd")
 			draw_rect(Rect2(-7,-4,9,8),ink,false,1.5)
 			draw_polyline(PackedVector2Array([Vector2(2,-2),Vector2(7,-4),Vector2(7,4),Vector2(2,2)]),ink,1.5,true)
+		"microphone":
+			if active:
+				ink = Color("75eabd")
+			draw_style_box(Design.surface(Color.TRANSPARENT,3,ink),Rect2(-2.5,-7,5,9))
+			draw_arc(Vector2(0,-1),5,0,PI,16,ink,1.5,true)
+			draw_line(Vector2(0,4),Vector2(0,7),ink,1.5,true)
+			draw_line(Vector2(-3,7),Vector2(3,7),ink,1.5,true)
+			if not active:
+				draw_line(Vector2(-7,-7),Vector2(7,7),ink,1.5,true)
+		"speaker":
+			draw_polyline(PackedVector2Array([Vector2(-7,-2),Vector2(-3,-2),Vector2(1,-6),Vector2(1,6),Vector2(-3,2),Vector2(-7,2),Vector2(-7,-2)]),ink,1.5,true)
+			if active:
+				draw_line(Vector2(4,-3),Vector2(9,3),Color("ff8d9d"),1.5,true)
+				draw_line(Vector2(4,3),Vector2(9,-3),Color("ff8d9d"),1.5,true)
+			else:
+				draw_arc(Vector2(1,0),6,-0.8,0.8,12,ink,1.5,true)
 		"leave":
 			draw_polyline(PackedVector2Array([Vector2(-1,-6),Vector2(-7,-6),Vector2(-7,6),Vector2(-1,6)]),ink,1.5,true)
 			draw_line(Vector2(-3,0),Vector2(7,0),ink,1.5,true)

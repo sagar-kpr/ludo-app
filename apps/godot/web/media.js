@@ -1,11 +1,17 @@
 (() => {
   if (window.__rallyMedia) return;
   let room, sdk, sdkPromise, epoch = 0, publishingEpoch = 0, wanted = false;
+  let desiredCamera = false, desiredMicrophone = false, mediaQueue = Promise.resolve();
+  const mutedParticipants = new Set();
   let layout = { visible: false, entries: [], width: 420, height: 860 };
   const events = [], videos = new Map(), audio = new Map();
   const emit = (state, message) => events.push({ state, message });
+  function remoteAudioState() {
+    const identities = new Set([...audio.values()].filter(entry => !entry.senderMuted).map(entry => entry.identity));
+    emit('remote_audio_state',JSON.stringify([...identities]));
+  }
   const mediaError = error => {
-    if (['NotAllowedError','PermissionDeniedError','SecurityError'].includes(error?.name)) return 'Camera or microphone permission was denied. Allow both in your browser settings, then tap the camera again.';
+    if (['NotAllowedError','PermissionDeniedError','SecurityError'].includes(error?.name)) return 'Access was denied. Allow the camera or microphone you want to use in your browser settings, then try again.';
     if (['NotFoundError','DevicesNotFoundError'].includes(error?.name)) return 'No camera or microphone was found on this device.';
     if (error?.name === 'NotReadableError') return 'Your camera or microphone is being used by another app.';
     return 'Camera and voice could not connect. Check your connection and try again.';
@@ -57,10 +63,12 @@
       const key = track.sid;
       if (audio.has(key)) return;
       const element = track.attach();
+      element.muted = mutedParticipants.has(identity);
       element.dataset.playerId = identity;
       element.style.display = 'none';
       layer()?.append(element);
-      audio.set(key, { element, track, identity });
+      audio.set(key, { element, track, identity, senderMuted:track.isMuted });
+      remoteAudioState();
     }
   }
   function removeVideo(identity) {
@@ -73,7 +81,7 @@
   function detach(track, participant) {
     if (track.kind === 'video' && videos.get(participant.identity)?.track === track) removeVideo(participant.identity);
     const previous = audio.get(track.sid);
-    if (previous) { track.detach(previous.element); previous.element.remove(); audio.delete(track.sid); }
+    if (previous) { track.detach(previous.element); previous.element.remove(); audio.delete(track.sid); remoteAudioState(); }
   }
   function loadSDK() {
     if (!sdkPromise) sdkPromise = new Promise((resolve,reject) => {
@@ -109,17 +117,21 @@
     }
     removeVideo(current.localParticipant.identity);
   }
-  function disconnect() {
+  function disconnect(clearMutes = true) {
     epoch++; publishingEpoch++; wanted = false;
+    desiredCamera = false; desiredMicrophone = false;
+    mediaQueue = Promise.resolve();
+    if (clearMutes) mutedParticipants.clear();
     const previous = room; room = null;
     if (previous) { stopLocal(previous); previous.disconnect().catch(() => {}); }
     for (const identity of [...videos.keys()]) removeVideo(identity);
     for (const entry of audio.values()) { entry.track.detach(entry.element); entry.element.remove(); }
     audio.clear();
+    remoteAudioState();
     document.querySelector('#rally-enable-voice')?.remove();
   }
   async function connect(credentials) {
-    disconnect();
+    disconnect(false);
     const attempt = epoch;
     try {
       sdk = await loadSDK();
@@ -137,6 +149,12 @@
       current.on(sdk.RoomEvent.LocalTrackUnpublished, publication => { if (room === current && publication.track) detach(publication.track,current.localParticipant); });
       for (const event of [sdk.RoomEvent.TrackMuted,sdk.RoomEvent.TrackUnmuted]) current.on(event,(publication,participant) => {
         if (room !== current) return;
+        if (publication.kind === 'audio') {
+          for (const entry of audio.values()) if (entry.identity === participant.identity && entry.track === publication.track) entry.senderMuted = publication.isMuted;
+          remoteAudioState();
+          return;
+        }
+        if (publication.kind !== 'video') return;
         const entry = videos.get(participant.identity);
         if (entry) { entry.muted = publication.isMuted; place(); }
       });
@@ -162,36 +180,78 @@
       if (attempt === epoch) { disconnect(); emit('error',mediaError(error)); }
     }
   }
-  async function setPublishing(enabled) {
-    wanted = enabled;
-    const attempt = ++publishingEpoch, current = room;
-    if (!enabled) { stopLocal(current); emit('publishing_disabled','Camera and microphone off.'); return; }
-    if (!current || current.state !== 'connected') return;
-    let tracks = [];
-    try {
-      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw {name:'SecurityError'};
-      emit('permissions_requested','Allow camera and microphone access to join the call.');
-      tracks = await sdk.createLocalTracks({
-        audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1,sampleRate:48000},
-        video:{facingMode:'user',resolution:{...sdk.VideoPresets.h360.resolution,frameRate:15}},
-      });
-      if (attempt !== publishingEpoch || !wanted || room !== current) { tracks.forEach(track=>track.stop()); return; }
-      for (const track of tracks) {
-        if (attempt !== publishingEpoch || !wanted || room !== current) break;
-        await current.localParticipant.publishTrack(track);
-      }
-      if (attempt !== publishingEpoch || !wanted || room !== current) {
-        tracks.forEach(track=>{ track.stop(); current.localParticipant.unpublishTrack(track,true).catch(()=>{}); }); return;
-      }
-      emit('publishing_enabled','Camera and microphone on. Tap the camera again to turn both off.');
-    } catch (error) {
-      tracks.forEach(track=>{ track.stop(); current.localParticipant.unpublishTrack(track,true).catch(()=>{}); });
-      if (attempt === publishingEpoch) { wanted = false; removeVideo(current.localParticipant.identity); emit('error',mediaError(error)); }
+  function setParticipantMuted(identity, muted) {
+    if (muted) mutedParticipants.add(identity); else mutedParticipants.delete(identity);
+    for (const entry of audio.values()) if (entry.identity === identity) entry.element.muted = muted;
+  }
+  function stopKind(current, kind) {
+    if (!current) return;
+    for (const publication of current.localParticipant.trackPublications.values()) {
+      const track = publication.track;
+      if (track?.kind !== kind) continue;
+      track.stop();
+      current.localParticipant.unpublishTrack(track,true).catch(()=>{});
     }
+    if (kind === 'video') removeVideo(current.localParticipant.identity);
+  }
+  function localState(current) {
+    const live = kind => [...current.localParticipant.trackPublications.values()].some(p => p.track?.kind === kind && p.track.mediaStreamTrack.readyState === 'live' && !p.isMuted);
+    const camera = live('video'), microphone = live('audio');
+    emit(camera ? 'camera_enabled' : 'camera_disabled',camera ? 'Camera on.' : 'Camera off.');
+    emit(microphone ? 'microphone_enabled' : 'microphone_disabled',microphone ? 'Microphone on.' : 'Microphone off.');
+    if (camera && microphone) emit('publishing_enabled','Camera and microphone on.');
+    if (!camera && !microphone) emit('publishing_disabled','Camera and microphone off.');
+  }
+  function setLocalMedia(camera, microphone) {
+    desiredCamera = !!camera; desiredMicrophone = !!microphone;
+    wanted = desiredCamera || desiredMicrophone;
+    const attempt = ++publishingEpoch, current = room;
+    // Stop unwanted capture immediately, including while another request waits
+    // for permission. Late captures are discarded by the generation checks.
+    if (!desiredCamera) stopKind(current,'video');
+    if (!desiredMicrophone) stopKind(current,'audio');
+    if (current && current.state !== 'connected') localState(current);
+    mediaQueue = mediaQueue.catch(()=>{}).then(async () => {
+      if (attempt !== publishingEpoch || room !== current || current?.state !== 'connected') return;
+      const has = kind => [...current.localParticipant.trackPublications.values()].some(p => p.track?.kind === kind && p.track.mediaStreamTrack.readyState === 'live');
+      const needCamera = desiredCamera && !has('video'), needMicrophone = desiredMicrophone && !has('audio');
+      for (const [kind, needed] of [['video',needCamera],['audio',needMicrophone]]) {
+        if (!needed || attempt !== publishingEpoch || room !== current) continue;
+        let tracks = [];
+        try {
+          if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw {name:'SecurityError'};
+          emit('permissions_requested',kind === 'video' ? 'Allow camera access to show your video.' : 'Allow microphone access to speak.');
+          // Independent requests let microphone-only calls work even if camera
+          // permission is denied or the device has no camera (and vice versa).
+          tracks = await sdk.createLocalTracks({
+            audio:kind === 'audio' ? {echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1,sampleRate:48000} : false,
+            video:kind === 'video' ? {facingMode:'user',resolution:{...sdk.VideoPresets.h360.resolution,frameRate:15}} : false,
+          });
+          if (attempt !== publishingEpoch || room !== current) { tracks.forEach(track=>track.stop()); break; }
+          for (const track of tracks) await current.localParticipant.publishTrack(track);
+          if (attempt !== publishingEpoch || room !== current) {
+            tracks.forEach(track=>{track.stop();current.localParticipant.unpublishTrack(track,true).catch(()=>{});});
+            break;
+          }
+        } catch (error) {
+          tracks.forEach(track=>{track.stop();current.localParticipant.unpublishTrack(track,true).catch(()=>{});});
+          if (attempt === publishingEpoch && room === current) {
+            if (kind === 'video') {desiredCamera = false;removeVideo(current.localParticipant.identity);emit('camera_error',mediaError(error));}
+            else {desiredMicrophone = false;emit('microphone_error',mediaError(error));}
+            wanted = desiredCamera || desiredMicrophone;
+          }
+        }
+      }
+      if (attempt === publishingEpoch && room === current) localState(current);
+    });
+    return mediaQueue;
+  }
+  function setPublishing(enabled) {
+    return setLocalMedia(enabled,enabled);
   }
   window.addEventListener('pagehide',disconnect);
   window.__rallyMedia = {
-    connect, disconnect, setPublishing,
+    connect, disconnect, setPublishing, setLocalMedia, setParticipantMuted,
     layout(data) { layout = data; place(); },
     poll() { return JSON.stringify(events.splice(0)); },
   };

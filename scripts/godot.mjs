@@ -35,6 +35,7 @@ else if (mode === 'test:computer') args.push('--headless', '--script', 'res://te
 else if (mode === 'test:recovery') args.push('--headless', '--script', 'res://tests/recovery.gd');
 else if (mode === 'test:lives') args.push('--headless', '--script', 'res://tests/timeout_lives.gd');
 else if (mode === 'test:leaving') args.push('--headless', '--script', 'res://tests/leaving.gd');
+else if (mode === 'test:media:native') args.push('--headless', '--script', 'res://tests/media_native.gd');
 else if (mode === 'test') args.push('--headless', '--script', 'res://tests/check.gd');
 else if (mode === 'build:web') {
   mkdirSync(path.join(project, 'dist'), { recursive: true });
@@ -55,7 +56,7 @@ else if (mode === 'build:web') {
   const release = mode === 'build:android:release';
   args.push('--headless', release ? '--export-release' : '--export-debug', 'Android', path.join(project, release ? 'dist-android/rally-ludo-release.apk' : 'dist-android/rally-ludo.apk'));
 } else if (mode !== 'run') {
-  console.error('Use run, editor, check, test, test:captures, test:perspective, test:computer, test:recovery, test:lives, test:leaving, build:web, build:android or build:android:release.');
+  console.error('Use run, editor, check, test, test:captures, test:perspective, test:computer, test:recovery, test:lives, test:leaving, test:media:native, build:web, build:android or build:android:release.');
   process.exit(1);
 }
 if (extra.length) args.push('--', ...extra);

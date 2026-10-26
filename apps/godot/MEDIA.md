@@ -3,9 +3,22 @@
 Web and native Android use the same LiveKit room and server-issued player
 identity. A player joins receive-only when an online friend game starts. They
 can see and hear other players without sharing their own camera or microphone.
-The camera icon toggles both devices. Missing permissions are requested together;
-already-granted permissions are reused. Turning off unpublishes and stops local
-tracks, restores the preset avatar, and leaves incoming audio/video connected.
+The first camera-icon tap starts camera and microphone. Extra controls stay hidden
+until sharing starts: a microphone button appears on your card. Separately, every
+listener sees a speaker button next to any other player who is actually sending
+audio, including listeners who have never enabled their own camera or microphone.
+Avatar-only or video-only players have no speaker button. Afterward, the camera icon
+hides/restores video independently; the microphone button mutes/unmutes your own
+outgoing voice. Hiding the camera restores the avatar while audio continues.
+Both can be turned off and restarted independently without losing the controls.
+The speaker button mutes only that player's audio on your device; it never mutes
+the sender for other listeners or hides their video. Multiple senders can be muted
+independently. The sender's own microphone switch stops outgoing audio for everyone.
+Mute choices survive track
+replacement and media reconnects in the same match, and reset when leaving.
+Permissions are requested only for devices being enabled, and existing grants
+are reused. A camera failure does not stop a working microphone (or vice versa).
+Disabled devices are unpublished and capture is stopped; incoming media continues.
 Bot games never join media and hide the camera button.
 
 Video targets 640×360 at 15 fps, with adaptive subscription and simulcast so small
@@ -52,8 +65,8 @@ select another player's identity or another room. Leaving revokes the participan
 
 Browser calls require HTTPS (localhost HTTP works for development). If mobile
 Safari blocks incoming audio, use the small **Tap to hear players** button; this
-does not request camera or microphone access. Camera permission denial leaves
-the player receive-only and displays a retry instruction.
+does not request camera or microphone access. Permission denial displays a retry
+instruction for the affected device while preserving any other active device.
 
 ## Android build
 
@@ -85,7 +98,49 @@ npm test
 npm run godot:check
 npm run godot:test:computer
 npm run godot:test:media
+npm run godot:test:media:native
 ```
+
+The native API regression test reproduces Android's separate JNI method registry.
+Use `JNISingleton.has_java_method()` when checking Kotlin/Java plugin functions;
+`Object.has_method()` does not enumerate that registry. This applies both to
+plugin discovery and to the video-layout capability check. See the
+[Godot 4.6 JNI API](https://docs.godotengine.org/en/4.6/classes/class_jnisingleton.html).
+
+The Android bridge reports readiness from `RoomEvent.Connected`, rather than
+assuming completion of signaling means the RTC transport is ready to publish.
+In the 0.2.1 fix, an isolated x86_64 Android 35 emulator build verified JNI
+discovery, both Android permission dialogs, and native camera/microphone
+publication to a browser subscriber. The browser decoded 360×640 camera video;
+the emulator also displayed the browser's test video in its avatar overlay.
+The distributed signed APK remains ARM64. This emulator check does not replace
+testing physical-phone microphones, cameras, audio routing or rendering.
+
+The 0.2.2 controls were also exercised in the Android emulator against a real
+browser subscriber: microphone mute/unmute with video retained, audio-only mode,
+both devices stopped, audio-only restart, camera restoration, and the native
+receiver-mute/unmute API. Browser integration tests check actual receiver playback
+mute, independent capture release, microphone continuity after camera denial,
+audio-only restart, and continued incoming audio/video. The native API/unit suite
+also checks that controls stay hidden before successful startup and remain usable
+when both devices are disabled. A native playback-volume call was exercised; an
+audible volume comparison on physical phones is still a device QA step.
+
+Version 0.2.3 ties each remote speaker button to actual incoming audio track
+state, independently of the receiver's local call. The native API/UI suite covers
+all publisher/receiver combinations for 2-, 3- and 4-player rooms, including
+multiple independent mutes. Live four-player browser integration verifies two
+broadcasters and two additional receive-only listeners, receiver-local mute,
+sender-wide microphone mute, silent-player controls, and broadcaster tab closure.
+An Android emulator receiving from a web broadcaster also verifies that the
+speaker button appears without starting local capture, hides on sender mic-off,
+returns on mic-on, and disappears on broadcaster disconnect.
+
+Android's engine boot splash uses `assets/rally_splash.png`, captured from the
+existing web loader's branding with animations frozen. `project.godot` sets this
+image explicitly so Android does not fall back to the Godot logo. Android's brief
+system launch screen can still show the app icon before the branded engine
+splash. The Android splash is static; the web loader keeps its existing animation.
 
 The media browser test needs `.tools/livekit/livekit-server` or `LIVEKIT_BIN`.
 It starts a local development LiveKit server with test-only credentials and

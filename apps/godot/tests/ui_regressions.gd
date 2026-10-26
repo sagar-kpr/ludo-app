@@ -20,6 +20,8 @@ func run() -> void:
 	client.network.disconnect_server()
 	client.network.set_process(false)
 	client.online = true
+	client.call_media.controls_open = true
+	client.call_media.remote_audio_players = {"1":true,"2":true,"3":true}
 	client.self_id = "0"
 	var players: Array = []
 	var tokens: Array = []
